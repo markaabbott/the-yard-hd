@@ -16,3 +16,13 @@
 ## API routes
 - `/api/create-payment-intent` — called by the client after `book_hold` when money is owed.
 - `/api/stripe-webhook` — Stripe calls this; do not call it yourself.
+
+## Pages (this slice)
+- `/signin` — Google + magic link (Apple button shown, disabled until Apple Developer approval).
+- `/schedule` — live cage/time grid for today or a picked date, real-time via Supabase `postgres_changes` on `reservations`.
+- Click an open slot → `BookingPanel`: pick duration, live quote (`quote_window` RPC), confirm (`book_hold` RPC) → Stripe Payment Element if money is owed.
+- `/booking/confirmed` — polls for the reservation to flip to `confirmed` (the webhook does that server-side) and shows the confirmation.
+
+Run `schema/003_availability.sql` in Supabase too — it adds `v_public_schedule`, a view the grid reads so customers see which slots are taken without seeing whose they are (reservations RLS only shows a customer their own rows, which is right for `/api/create-payment-intent` but wrong for a shared grid).
+
+Only drop-in booking is wired in this slice. Memberships, teams, parties, clinics, and the admin screens still need their own pages.
