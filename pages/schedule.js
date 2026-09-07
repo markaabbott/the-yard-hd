@@ -4,58 +4,127 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import BookingPanel from '../components/BookingPanel';
 
-function ymd(d) { return d.toISOString().slice(0, 10); }
-function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
+const FALLBACK_TZ = 'America/Los_Angeles';
+
+// --- Timezone-correct day math ---------------------------------------------
+// The facility's day runs on facility_settings.timezone, not on the visitor's
+// clock. A player in Phoenix and a coach in Apple Valley must see the same
+// grid, so every boundary is resolved in the facility zone and stored as an
+// absolute instant.
+
+function tzOffsetMs(utcDate, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(utcDate)) {
+    if (part.type !== 'literal') p[part.type] = part.value;
+  }
+  const asUTC = Date.UTC(
+    +p.year, +p.month - 1, +p.day,
+    p.hour === '24' ? 0 : +p.hour, +p.minute, +p.second
+  );
+  return asUTC - Math.floor(utcDate.getTime() / 1000) * 1000;
+}
+
+// Absolute instant for a wall-clock time in `tz`. Resolved twice so the answer
+// stays correct when the guess lands on the far side of a DST transition.
+function zonedTimeToUtc(ymd, hours, minutes, tz) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const guess = Date.UTC(y, m - 1, d, hours, minutes, 0);
+  let ms = guess - tzOffsetMs(new Date(guess), tz);
+  ms = guess - tzOffsetMs(new Date(ms), tz);
+  return new Date(ms);
+}
+
+function todayYmd(tz) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
+function addDaysYmd(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+function labelYmd(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric'
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
 
 export default function Schedule() {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
 
-  const [date, setDate] = useState(() => new Date());
   const [settings, setSettings] = useState(null);
   const [cages, setCages] = useState([]);
-  const [busy, setBusy] = useState([]); // [{cage_id, starts_at, ends_at}]
+  const [busy, setBusy] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [loadingGrid, setLoadingGrid] = useState(true);
-  const [selected, setSelected] = useState(null); // { cage, startsAt }
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [dayYmd, setDayYmd] = useState(() => todayYmd(FALLBACK_TZ));
+
+  const tz = settings?.timezone || FALLBACK_TZ;
 
   useEffect(() => {
     if (!loading && !user) router.replace('/signin');
   }, [loading, user, router]);
 
-  useEffect(() => {
-    supabase.from('facility_settings').select('*').eq('id', 1).single()
-      .then(({ data }) => setSettings(data));
-    supabase.from('cages').select('*').eq('active', true).order('sort_order')
-      .then(({ data }) => setCages(data || []));
-  }, []);
+  const dayStart = useMemo(() => zonedTimeToUtc(dayYmd, 0, 0, tz), [dayYmd, tz]);
+  const dayEnd = useMemo(() => zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz), [dayYmd, tz]);
 
-  const dayStart = useMemo(() => { const d = new Date(date); d.setHours(0,0,0,0); return d; }, [date]);
-  const dayEnd = useMemo(() => addDays(dayStart, 1), [dayStart]);
-
-  const loadGrid = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoadingGrid(true);
-    const [{ data: res }, { data: blk }] = await Promise.all([
+    setError(null);
+
+    const [settingsRes, cagesRes, scheduleRes, blocksRes] = await Promise.all([
+      supabase.from('facility_settings').select('*').eq('id', 1).single(),
+      supabase.from('cages').select('*').eq('active', true).order('sort_order'),
       supabase.from('v_public_schedule').select('cage_id, starts_at, ends_at')
         .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString()),
       supabase.from('blocks').select('cage_id, scope, starts_at, ends_at')
         .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString())
     ]);
-    setBusy(res || []);
-    setBlocks(blk || []);
+
+    const failure = [settingsRes, cagesRes, scheduleRes, blocksRes].find((r) => r.error);
+    if (failure) {
+      // Surface it. A silent failure here used to leave the page spinning
+      // forever, which reads to a customer as "this business is broken".
+      console.error('[schedule] load failed', failure.error);
+      setError(failure.error.message || 'Could not load the schedule.');
+      setLoadingGrid(false);
+      return;
+    }
+
+    if (!settingsRes.data) {
+      setError('Facility hours are not configured yet.');
+      setLoadingGrid(false);
+      return;
+    }
+
+    setSettings(settingsRes.data);
+    setCages(cagesRes.data || []);
+    setBusy(scheduleRes.data || []);
+    setBlocks(blocksRes.data || []);
     setLoadingGrid(false);
   }, [dayStart, dayEnd]);
 
-  useEffect(() => { loadGrid(); }, [loadGrid]);
+  useEffect(() => { load(); }, [load]);
 
-  // Real-time: any reservation change on this cage set triggers a grid refetch.
-  // (Subscribed to the base table for change notifications; identity is never read client-side.)
   useEffect(() => {
     const channel = supabase.channel('reservations-watch')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => loadGrid())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => load())
       .subscribe();
     return () => supabase.removeChannel(channel);
-  }, [loadGrid]);
+  }, [load]);
 
   if (loading || !user) return null;
 
@@ -63,9 +132,12 @@ export default function Schedule() {
   if (settings) {
     const [oh, om] = settings.open_time.split(':').map(Number);
     const [ch, cm] = settings.close_time.split(':').map(Number);
-    let t = new Date(dayStart); t.setHours(oh, om, 0, 0);
-    const end = new Date(dayStart); end.setHours(ch, cm, 0, 0);
-    while (t < end) { slots.push(new Date(t)); t = new Date(t.getTime() + settings.slot_minutes * 60000); }
+    let t = zonedTimeToUtc(dayYmd, oh, om, tz);
+    const end = zonedTimeToUtc(dayYmd, ch, cm, tz);
+    while (t < end) {
+      slots.push(new Date(t));
+      t = new Date(t.getTime() + settings.slot_minutes * 60000);
+    }
   }
 
   function isTaken(cageId, slotStart) {
@@ -89,14 +161,28 @@ export default function Schedule() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-        <button onClick={() => setDate(addDays(date, -1))} style={navBtn}>‹</button>
+        <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn}>‹</button>
         <div style={{ fontWeight: 700, fontSize: 15, minWidth: 190, textAlign: 'center' }}>
-          {date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+          {labelYmd(dayYmd)}
         </div>
-        <button onClick={() => setDate(addDays(date, 1))} style={navBtn}>›</button>
+        <button onClick={() => setDayYmd(addDaysYmd(dayYmd, 1))} style={navBtn}>›</button>
       </div>
 
-      {loadingGrid || !settings ? (
+      {error ? (
+        <div style={{ border: '1px solid rgba(186,12,47,.35)', background: '#fff', borderRadius: 10, padding: '22px 24px' }}>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 16, letterSpacing: '.06em', textTransform: 'uppercase', color: '#BA0C2F', marginBottom: 8 }}>
+            Schedule unavailable
+          </div>
+          <div style={{ fontSize: 13.5, lineHeight: 1.7, color: 'rgba(0,0,0,.7)', marginBottom: 16 }}>
+            We couldn&rsquo;t load today&rsquo;s availability. This is on us, not you &mdash; try again, or call
+            {' '}{settings?.phone || '(760) 553-5996'} and we&rsquo;ll book you over the phone.
+          </div>
+          <div style={{ fontSize: 11.5, color: 'rgba(0,0,0,.4)', marginBottom: 16, fontFamily: 'ui-monospace, monospace' }}>{error}</div>
+          <button onClick={() => load()} style={{ padding: '11px 22px', border: 'none', borderRadius: 6, background: '#BA0C2F', color: '#fff', cursor: 'pointer', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase' }}>
+            Try again
+          </button>
+        </div>
+      ) : loadingGrid || !settings ? (
         <div style={{ color: 'rgba(0,0,0,.4)', fontSize: 14 }}>Loading schedule…</div>
       ) : (
         <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
@@ -105,7 +191,9 @@ export default function Schedule() {
             {cages.map((c) => <div key={c.id} style={cellHead}>{c.name}</div>)}
             {slots.map((s) => (
               <React.Fragment key={s.toISOString()}>
-                <div style={{ ...cellTime }}>{s.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
+                <div style={{ ...cellTime }}>
+                  {s.toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' })}
+                </div>
                 {cages.map((c) => {
                   const taken = isTaken(c.id, s);
                   const past = s < now;
