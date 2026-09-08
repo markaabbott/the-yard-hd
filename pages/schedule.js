@@ -226,8 +226,8 @@ export default function Schedule() {
           startsAt={selected.startsAt}
           slotMinutes={settings.slot_minutes}
           userId={user.id}
-          onClose={() => setSelected(null)}
-          onBooked={(groupId) => router.push(`/booking/confirmed?group=${groupId}`)}
+          onClose={() => { setSelected(null); load(); }}
+          onBooked={() => { setSelected(null); load(); }}
         />
       )}
     </main>
