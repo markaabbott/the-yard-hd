@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import PaymentForm from './PaymentForm';
 
@@ -12,8 +12,44 @@ export default function BookingPanel({ cage, startsAt, slotMinutes, userId, onCl
   const [err, setErr] = useState(null);
   const [clientSecret, setClientSecret] = useState(null);
   const [groupId, setGroupId] = useState(null);
+  const [paid, setPaid] = useState(false);
+  const [closing, setClosing] = useState(false);
+
+  // Kept in a ref so the unmount cleanup can read the live values without
+  // re-running the effect every render.
+  const holdRef = useRef({ groupId: null, paid: false });
+  holdRef.current = { groupId, paid };
 
   const endsAt = new Date(startsAt.getTime() + hours * 3600000);
+
+  // Only the modal scrolls while it's open; the schedule grid behind it stays
+  // put instead of stealing the wheel.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Last-resort release: the customer closed the tab or hit back with an
+  // unpaid hold open. Fires and forgets — keepalive lets it survive unload.
+  useEffect(() => {
+    function bail() {
+      const { groupId: g, paid: p } = holdRef.current;
+      if (!g || p) return;
+      supabase.auth.getSession().then(({ data }) => {
+        const token = data?.session?.access_token;
+        if (!token) return;
+        fetch('/api/release-hold', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ groupId: g })
+        }).catch(() => {});
+      });
+    }
+    window.addEventListener('pagehide', bail);
+    return () => { window.removeEventListener('pagehide', bail); bail(); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,8 +80,7 @@ export default function BookingPanel({ cage, startsAt, slotMinutes, userId, onCl
       p_kind: 'drop_in',
       p_user_id: userId
     });
-    setBooking(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setBooking(false); setErr(error.message); return; }
 
     const result = Array.isArray(data) ? data[0] : data;
     setGroupId(result.group_id);
@@ -57,62 +92,157 @@ export default function BookingPanel({ cage, startsAt, slotMinutes, userId, onCl
         body: JSON.stringify({ paymentId: result.payment_id })
       });
       const json = await res.json();
+      setBooking(false);
       if (json.error) { setErr(json.error); return; }
       setClientSecret(json.clientSecret);
     } else {
-      onBooked(result.group_id);
+      setBooking(false);
+      setPaid(true);
     }
   }
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 20 }}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: 26, width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 20, textTransform: 'uppercase' }}>{cage.name}</div>
-            <div style={{ fontSize: 13, color: 'rgba(0,0,0,.55)', marginTop: 4 }}>
-              {startsAt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} · {startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-            </div>
-          </div>
-          <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 18, cursor: 'pointer', color: 'rgba(0,0,0,.4)' }}>×</button>
-        </div>
+  // Dismiss. An unpaid hold gets released here — both the reservation row and
+  // the open PaymentIntent — so the slot reopens and Stripe doesn't collect a
+  // pile of Incomplete payments.
+  async function dismiss() {
+    if (paid) { onBooked ? onBooked(groupId) : onClose(); return; }
+    if (!groupId) { onClose(); return; }
 
-        {clientSecret ? (
-          <PaymentForm
-            clientSecret={clientSecret}
-            onSuccess={() => onBooked(groupId)}
-          />
-        ) : (
-          <>
+    setClosing(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      await fetch('/api/release-hold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ groupId })
+      });
+    } catch (e) {
+      console.error('[booking] release failed', e);
+    }
+    holdRef.current = { groupId: null, paid: false };
+    onClose();
+  }
+
+  const dateLine = startsAt.toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric'
+  });
+  const timeLine = startsAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  return (
+    <div
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !clientSecret && !closing) dismiss(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 20,
+        background: 'rgba(0,0,0,.4)',
+        overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain'
+      }}
+    >
+      {/* min-height + auto margins: centered when the card is short, top-aligned
+          and scrollable the moment it's taller than the viewport. */}
+      <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            background: '#fff', borderRadius: 12, width: '100%', maxWidth: 440,
+            margin: 'auto', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 24px 60px rgba(0,0,0,.22)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '24px 26px 0' }}>
             <div>
-              <label style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'rgba(0,0,0,.6)' }}>Duration</label>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                {[1, 1.5, 2, 3].map((h) => (
-                  <button key={h} onClick={() => setHours(h)}
-                    style={{ padding: '8px 14px', borderRadius: 7, border: hours === h ? '1.5px solid #BA0C2F' : '1px solid rgba(0,0,0,.15)', background: hours === h ? 'rgba(186,12,47,.06)' : '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
-                    {h} hr
-                  </button>
-                ))}
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 20, textTransform: 'uppercase', letterSpacing: '.02em' }}>
+                {paid ? "You're booked" : cage.name}
+              </div>
+              <div style={{ fontSize: 13, color: 'rgba(0,0,0,.55)', marginTop: 4 }}>
+                {paid ? `${cage.name} · ` : ''}{dateLine} · {timeLine}
               </div>
             </div>
-
-            <div style={{ borderTop: '1px solid rgba(0,0,0,.08)', paddingTop: 14, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-              <span style={{ color: 'rgba(0,0,0,.6)' }}>Total</span>
-              <span style={{ fontWeight: 700 }}>{quoting ? '…' : money(quote?.out_gross_cents ?? 0)}</span>
-            </div>
-
-            {err && <div style={{ fontSize: 12.5, color: '#BA0C2F' }}>{err}</div>}
-
             <button
-              onClick={confirm}
-              disabled={quoting || booking}
-              style={{ padding: '13px 16px', borderRadius: 7, border: 'none', background: '#BA0C2F', color: '#fff', fontWeight: 700, fontSize: 14, cursor: quoting || booking ? 'default' : 'pointer', opacity: quoting || booking ? 0.6 : 1 }}
+              onClick={dismiss}
+              disabled={closing}
+              aria-label="Close"
+              style={{
+                border: 'none', background: 'none', fontSize: 22, lineHeight: 1,
+                cursor: closing ? 'default' : 'pointer', color: 'rgba(0,0,0,.4)',
+                padding: 0, marginTop: -2
+              }}
             >
-              {booking ? 'Booking…' : 'Confirm booking'}
+              ×
             </button>
-          </>
-        )}
+          </div>
+
+          <div style={{ padding: '18px 26px 26px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {paid ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(20,120,60,.07)', border: '1px solid rgba(20,120,60,.22)', borderRadius: 9, padding: '13px 15px' }}>
+                  <span style={{ color: '#14783C', fontSize: 15, fontWeight: 700 }}>✓</span>
+                  <span style={{ fontSize: 13.5, lineHeight: 1.6, color: 'rgba(0,0,0,.75)' }}>
+                    Payment received. A confirmation email is on its way.
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid rgba(0,0,0,.08)', paddingTop: 14 }}>
+                  <span style={{ color: 'rgba(0,0,0,.6)' }}>Paid</span>
+                  <span style={{ fontWeight: 700 }}>{money(quote?.out_gross_cents ?? 0)}</span>
+                </div>
+                <button onClick={dismiss} style={primaryBtn}>Done</button>
+              </>
+            ) : clientSecret ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderBottom: '1px solid rgba(0,0,0,.08)', paddingBottom: 14 }}>
+                  <span style={{ color: 'rgba(0,0,0,.6)' }}>{hours} hr · due now</span>
+                  <span style={{ fontWeight: 700 }}>{money(quote?.out_gross_cents ?? 0)}</span>
+                </div>
+                <PaymentForm clientSecret={clientSecret} onSuccess={() => setPaid(true)} />
+                <button
+                  onClick={dismiss}
+                  disabled={closing}
+                  style={{ border: 'none', background: 'none', fontSize: 13, color: 'rgba(0,0,0,.5)', cursor: closing ? 'default' : 'pointer', textDecoration: 'underline', padding: 0 }}
+                >
+                  {closing ? 'Releasing your hold…' : 'Cancel and release this time'}
+                </button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'rgba(0,0,0,.6)' }}>Duration</label>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    {[1, 1.5, 2, 3].map((h) => (
+                      <button key={h} onClick={() => setHours(h)}
+                        style={{ padding: '8px 14px', borderRadius: 7, border: hours === h ? '1.5px solid #BA0C2F' : '1px solid rgba(0,0,0,.15)', background: hours === h ? 'rgba(186,12,47,.06)' : '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
+                        {h} hr
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid rgba(0,0,0,.08)', paddingTop: 14, display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                  <span style={{ color: 'rgba(0,0,0,.6)' }}>Total</span>
+                  <span style={{ fontWeight: 700 }}>{quoting ? '…' : money(quote?.out_gross_cents ?? 0)}</span>
+                </div>
+
+                {err && <div style={{ fontSize: 12.5, color: '#BA0C2F', lineHeight: 1.6 }}>{err}</div>}
+
+                <button
+                  onClick={confirm}
+                  disabled={quoting || booking}
+                  style={{ ...primaryBtn, cursor: quoting || booking ? 'default' : 'pointer', opacity: quoting || booking ? 0.6 : 1 }}
+                >
+                  {booking ? 'Booking…' : 'Confirm booking'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+const primaryBtn = {
+  padding: '13px 16px', borderRadius: 7, border: 'none',
+  background: '#BA0C2F', color: '#fff',
+  fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 15,
+  letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer'
+};
