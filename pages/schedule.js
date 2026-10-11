@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import BookingPanel from '../components/BookingPanel';
+import NamePrompt from '../components/NamePrompt';
 
 const FALLBACK_TZ = 'America/Los_Angeles';
 
@@ -71,12 +72,19 @@ export default function Schedule() {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [dayYmd, setDayYmd] = useState(() => todayYmd(FALLBACK_TZ));
+  const [needsName, setNeedsName] = useState(false);
 
   const tz = settings?.timezone || FALLBACK_TZ;
 
   useEffect(() => {
     if (!loading && !user) router.replace('/signin');
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('users').select('needs_name').eq('id', user.id).single()
+      .then(({ data }) => setNeedsName(!!data?.needs_name));
+  }, [user]);
 
   const dayStart = useMemo(() => zonedTimeToUtc(dayYmd, 0, 0, tz), [dayYmd, tz]);
   const dayEnd = useMemo(() => zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz), [dayYmd, tz]);
@@ -219,6 +227,8 @@ export default function Schedule() {
           </div>
         </div>
       )}
+
+      {needsName && <NamePrompt onDone={() => setNeedsName(false)} />}
 
       {selected && (
         <BookingPanel
