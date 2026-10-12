@@ -15,7 +15,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end('Method not allowed');
 
-  const { groupId, reason } = req.body || {};
+  const { groupId, reason, chargeFee } = req.body || {};
   if (!groupId) return res.status(400).json({ error: 'groupId required' });
 
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -31,6 +31,7 @@ export default async function handler(req, res) {
   const { data: result, error } = await asUser.rpc('cancel_reservation_group', {
     p_group_id: groupId,
     p_reason: (typeof reason === 'string' && reason.trim().slice(0, 200)) || 'canceled online',
+    p_charge_fee: !!chargeFee,
   });
   if (error) {
     const status = error.code === '42501' ? 403 : error.code === '22023' ? 409 : 500;
