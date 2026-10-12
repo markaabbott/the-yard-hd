@@ -75,6 +75,7 @@ export default function Schedule() {
   const [dayYmd, setDayYmd] = useState(() => todayYmd(FALLBACK_TZ));
   const [needsName, setNeedsName] = useState(false);
   const [bookingsKey, setBookingsKey] = useState(0);
+  const [isStaff, setIsStaff] = useState(false);
 
   const tz = settings?.timezone || FALLBACK_TZ;
 
@@ -86,6 +87,8 @@ export default function Schedule() {
     if (!user) return;
     supabase.from('users').select('needs_name').eq('id', user.id).single()
       .then(({ data }) => setNeedsName(!!data?.needs_name));
+    supabase.from('user_roles').select('role').eq('user_id', user.id).in('role', ['coach', 'admin', 'owner'])
+      .then(({ data }) => setIsStaff(!!data?.length));
   }, [user]);
 
   const dayStart = useMemo(() => zonedTimeToUtc(dayYmd, 0, 0, tz), [dayYmd, tz]);
@@ -165,9 +168,16 @@ export default function Schedule() {
         <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 26, textTransform: 'uppercase', letterSpacing: '.03em' }}>
           Book a session
         </div>
-        <button onClick={() => signOut()} style={{ border: 'none', background: 'none', color: 'rgba(0,0,0,.5)', cursor: 'pointer', fontSize: 13 }}>
-          Sign out
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {isStaff && (
+            <a href="/staff" style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 13, letterSpacing: '.1em', textTransform: 'uppercase', background: '#000', color: '#fff', padding: '7px 14px', borderRadius: 5, textDecoration: 'none' }}>
+              Staff schedule
+            </a>
+          )}
+          <button onClick={() => signOut()} style={{ border: 'none', background: 'none', color: 'rgba(0,0,0,.5)', cursor: 'pointer', fontSize: 13 }}>
+            Sign out
+          </button>
+        </div>
       </div>
 
       {settings && <MyBookings key={bookingsKey} userId={user.id} settings={settings} tz={tz} onChange={load} />}
