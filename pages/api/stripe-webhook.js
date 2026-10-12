@@ -6,6 +6,7 @@
 
 import Stripe from 'stripe';
 import { supabaseAdmin as supabase } from '../../lib/supabaseAdmin';
+import { drainNotifications } from '../../lib/notifications';
 export const config = { api: { bodyParser: false } };
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
@@ -46,6 +47,9 @@ export default async function handler(req, res) {
           p_fee_cents: feeCents
         });
         if (error) throw error;
+        // Send the receipt now instead of waiting for the cron. An email
+        // failure must not make Stripe retry a payment that already applied.
+        try { await drainNotifications(); } catch (e) { console.error('[webhook] email drain', e.message); }
         break;
       }
 
