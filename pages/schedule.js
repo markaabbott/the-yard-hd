@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import BookingPanel from '../components/BookingPanel';
 import NamePrompt from '../components/NamePrompt';
+import MyBookings from '../components/MyBookings';
 
 const FALLBACK_TZ = 'America/Los_Angeles';
 
@@ -73,6 +74,7 @@ export default function Schedule() {
   const [selected, setSelected] = useState(null);
   const [dayYmd, setDayYmd] = useState(() => todayYmd(FALLBACK_TZ));
   const [needsName, setNeedsName] = useState(false);
+  const [bookingsKey, setBookingsKey] = useState(0);
 
   const tz = settings?.timezone || FALLBACK_TZ;
 
@@ -168,6 +170,8 @@ export default function Schedule() {
         </button>
       </div>
 
+      {settings && <MyBookings key={bookingsKey} userId={user.id} settings={settings} tz={tz} onChange={load} />}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
         <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn}>‹</button>
         <div style={{ fontWeight: 700, fontSize: 15, minWidth: 190, textAlign: 'center' }}>
@@ -237,7 +241,7 @@ export default function Schedule() {
           slotMinutes={settings.slot_minutes}
           userId={user.id}
           onClose={() => { setSelected(null); load(); }}
-          onBooked={() => { setSelected(null); load(); }}
+          onBooked={() => { setSelected(null); load(); setBookingsKey((k) => k + 1); }}
         />
       )}
     </main>
