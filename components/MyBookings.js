@@ -17,17 +17,19 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
       supabase.from('reservations').select('group_id, starts_at, ends_at, cages(name, sort_order)')
         .eq('user_id', userId).eq('status', 'confirmed').gt('starts_at', new Date().toISOString())
         .order('starts_at'),
-      supabase.from('payments').select('reservation_group_id, amount_cents, method')
+      supabase.from('payments').select('reservation_group_id, amount_cents, method, processing_fee_cents')
         .eq('user_id', userId).eq('entry_type', 'charge').eq('status', 'succeeded'),
     ]);
-    const paid = new Map((pays || []).map((p) => [p.reservation_group_id, p.amount_cents]));
+    const paid = new Map((pays || []).map((p) => [p.reservation_group_id, p]));
     const byGroup = new Map();
     for (const r of res || []) {
       const g = byGroup.get(r.group_id) || { groupId: r.group_id, startsAt: r.starts_at, endsAt: r.ends_at, cages: [] };
       if (r.starts_at < g.startsAt) g.startsAt = r.starts_at;
       if (r.ends_at > g.endsAt) g.endsAt = r.ends_at;
       if (r.cages && !g.cages.includes(r.cages.name)) g.cages.push(r.cages.name);
-      g.paidCents = paid.get(r.group_id) || 0;
+      const p = paid.get(r.group_id);
+      g.paidCents = p?.amount_cents || 0;
+      g.feeCents = p?.method === 'card' ? p.processing_fee_cents || 0 : 0;
       byGroup.set(r.group_id, g);
     }
     setGroups([...byGroup.values()]);
@@ -38,7 +40,9 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
   function refundFor(g) {
     const hrs = (new Date(g.startsAt) - Date.now()) / 3.6e6;
     const frac = hrs >= settings.cancel_free_hours ? 1 : hrs >= settings.cancel_half_hours ? 0.5 : 0;
-    return { frac, cents: Math.round(g.paidCents * frac) };
+    const gross = Math.round(g.paidCents * frac);
+    const fee = frac > 0 ? Math.min(g.feeCents, gross) : 0;
+    return { frac, cents: gross - fee, fee };
   }
 
   async function cancel(g) {
@@ -81,7 +85,7 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
       )}
       <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
         {groups.map((g, i) => {
-          const { frac, cents } = refundFor(g);
+          const { frac, cents, fee } = refundFor(g);
           const open = confirming === g.groupId;
           return (
             <div key={g.groupId} style={{ borderTop: i ? '1px solid rgba(0,0,0,.08)' : 'none', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -103,7 +107,7 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
                       ? (frac === 1 ? 'Your membership hours will be returned.' : 'Past the free-cancel window, so membership hours won\'t be returned.')
                       : frac === 0
                         ? <>Starts in under {settings.cancel_half_hours} hours. <strong>No refund.</strong></>
-                        : <>You'll be refunded <strong>{money(cents)}</strong>{frac < 1 ? ` (50% of ${money(g.paidCents)})` : ''}.</>}
+                        : <>You'll be refunded <strong>{money(cents)}</strong>{frac < 1 ? ` (50% of ${money(g.paidCents)}` : ` (${money(g.paidCents)}`}{fee > 0 ? `, less ${money(fee)} card fee)` : ')'}.</>}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button disabled={working} onClick={() => setConfirming(null)} style={{ padding: '9px 14px', borderRadius: 6, border: '1px solid rgba(0,0,0,.15)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
