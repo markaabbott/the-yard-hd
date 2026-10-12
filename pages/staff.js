@@ -21,6 +21,7 @@ export default function Staff() {
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [showCanceled, setShowCanceled] = useState(false);
+  const [flash, setFlash] = useState(null);
 
   useEffect(() => { if (!loading && !user) router.replace('/signin'); }, [loading, user, router]);
 
@@ -149,6 +150,13 @@ export default function Staff() {
         )}
       </div>
 
+      {flash && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13.5, padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: '#E8F0EA', color: '#14532A' }}>
+          <span>{flash}</span>
+          <button onClick={() => setFlash(null)} aria-label="Dismiss" style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#14532A', fontSize: 14 }}>✕</button>
+        </div>
+      )}
+
       {error ? (
         <div style={{ border: '1px solid rgba(186,12,47,.35)', borderRadius: 10, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
           <div style={{ fontSize: 14, color: RED, fontWeight: 600 }}>Couldn&rsquo;t load the schedule.</div>
@@ -208,7 +216,11 @@ export default function Staff() {
         </div>
       )}
 
-      {open && <StaffBookingDetail key={open.groupId} group={open} tz={tz} onClose={() => setOpenId(null)} onChanged={load} />}
+      {open && <StaffBookingDetail
+          key={open.groupId} group={open} tz={tz} settings={data.settings} cages={cages}
+          onClose={() => setOpenId(null)} onChanged={load}
+          onMoved={(ymd, text) => { setOpenId(null); setFlash(text); if (ymd !== dayYmd) setDayYmd(ymd); else load(); }}
+        />}
     </main>
   );
 }
