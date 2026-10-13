@@ -35,7 +35,10 @@ export default async function handler(req, res) {
   if (rowErr) return res.status(500).json({ error: rowErr.message });
   if (!rows || rows.length === 0) return res.status(200).json({ released: 0 });
   if (!rows.every((r) => r.user_id === uid)) {
-    return res.status(403).json({ error: 'not your reservation' });
+    // Staff keying in a card for a customer can release that checkout too.
+    const { data: roles } = await supabase.from('user_roles').select('role')
+      .eq('user_id', uid).in('role', ['coach', 'admin', 'owner']);
+    if (!roles?.length) return res.status(403).json({ error: 'not your reservation' });
   }
 
   // Already paid? Leave it alone — cancelling a confirmed booking goes through
