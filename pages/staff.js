@@ -8,9 +8,11 @@ import { STATES, LEGEND } from '../lib/staffStates';
 import StaffBookingDetail from '../components/StaffBookingDetail';
 import StaffNew from '../components/StaffNew';
 import StaffBlockDetail from '../components/StaffBlockDetail';
-import StaffCheckIn from '../components/StaffCheckIn';
+import StaffBookings from '../components/StaffBookings';
 import StaffCustomer from '../components/StaffCustomer';
 import StaffReports from '../components/StaffReports';
+import StaffTeam from '../components/StaffTeam';
+import StaffAlerts from '../components/StaffAlerts';
 
 const RED = '#BA0C2F';
 const FALLBACK_TZ = 'America/Los_Angeles';
@@ -31,8 +33,15 @@ export default function Staff() {
   const [flash, setFlash] = useState(null);
   const [newOpen, setNewOpen] = useState(null); // { tab, cageId?, startsAt?, fromHold? }
   const [blockOpen, setBlockOpen] = useState(null);
-  const [view, setView] = useState('schedule'); // schedule | checkin | reports
+  const [view, setView] = useState('schedule'); // schedule | bookings | reports
   const [custOpen, setCustOpen] = useState(null); // { id? }
+  const [alertsOpen, setAlertsOpen] = useState(false);
+
+  // Alert emails link to /staff?day=YYYY-MM-DD.
+  useEffect(() => {
+    const d = router.query.day;
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) setDayYmd(d);
+  }, [router.query.day]);
 
   useEffect(() => { if (!loading && !user) router.replace('/signin'); }, [loading, user, router]);
 
@@ -114,6 +123,7 @@ export default function Staff() {
     if (ymd && ymd !== dayYmd) setDayYmd(ymd); else load();
   };
   const isToday = dayYmd === todayYmd(tz);
+  const perms = data?.perms || {};
   const cages = data?.cages || [];
 
   return (
@@ -128,6 +138,7 @@ export default function Staff() {
           )}
         </div>
         <nav style={{ display: 'flex', alignItems: 'center', gap: 18, fontSize: 13 }}>
+          <button onClick={() => setAlertsOpen(true)} style={{ border: 'none', background: 'none', padding: 0, color: 'rgba(0,0,0,.6)', cursor: 'pointer', fontSize: 13 }}>Email alerts</button>
           <Link href="/schedule" style={{ color: 'rgba(0,0,0,.6)' }}>Customer booking</Link>
           <button onClick={() => signOut()} style={{ border: 'none', background: 'none', padding: 0, color: 'rgba(0,0,0,.6)', cursor: 'pointer', fontSize: 13 }}>Sign out</button>
         </nav>
@@ -137,7 +148,7 @@ export default function Staff() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {data && (
             <div role="tablist" style={{ display: 'flex', gap: 22, marginBottom: 6 }}>
-              {[['schedule', 'Schedule'], ['checkin', 'Check-in'], ...(data.canBlock ? [['reports', 'Reports']] : [])].map(([k, l]) => (
+              {[['schedule', 'Schedule'], ['bookings', 'Bookings'], ...(perms.reports ? [['reports', 'Reports']] : []), ...(perms.team ? [['team', 'Team']] : [])].map(([k, l]) => (
                 <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} style={{
                   border: 'none', background: 'none', padding: '0 0 6px', cursor: 'pointer',
                   fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 28, textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1,
@@ -147,11 +158,12 @@ export default function Staff() {
             </div>
           )}
           <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.55)' }}>
-            {view === 'checkin' ? 'Check people in as they arrive. Collect anything owed first.'
+            {view === 'bookings' ? 'Everything booked this day. Collect what\'s owed and mark no-shows.'
               : view === 'reports' ? 'Revenue, bookings, and cage use for any date range.'
+              : view === 'team' ? 'Who has staff access, and what coaches are allowed to do.'
               : 'Click an open slot to book, hold, or block it. Click anything on the grid for details.'}
           </div>
-          {data && (
+          {data && view !== 'team' && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               <button onClick={() => setNewOpen({ tab: 'booking' })} style={{ ...newBtn, background: RED, color: '#fff', border: 'none' }}>+ Book for a customer</button>
               <button onClick={() => setNewOpen({ tab: 'hold' })} style={newBtn}>Hold time</button>
@@ -160,7 +172,7 @@ export default function Staff() {
             </div>
           )}
         </div>
-        {view !== 'reports' && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {!['reports', 'team'].includes(view) && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn} aria-label="Previous day">‹</button>
           <div style={{ fontWeight: 700, fontSize: 15, minWidth: 200, textAlign: 'center' }}>{labelYmd(dayYmd)}</div>
           <button onClick={() => setDayYmd(addDaysYmd(dayYmd, 1))} style={navBtn} aria-label="Next day">›</button>
@@ -204,10 +216,12 @@ export default function Staff() {
         </div>
       ) : view === 'reports' ? (
         <StaffReports tz={tz} />
+      ) : view === 'team' ? (
+        <StaffTeam />
       ) : !grid ? (
         <div style={{ color: 'rgba(0,0,0,.4)', fontSize: 14 }}>Loading schedule…</div>
-      ) : view === 'checkin' ? (
-        <StaffCheckIn groups={data.groups} tz={tz} isToday={isToday} onOpen={setOpenId} onChanged={load} />
+      ) : view === 'bookings' ? (
+        <StaffBookings groups={data.groups} tz={tz} onOpen={setOpenId} onChanged={load} />
       ) : (
         <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
           <div style={{
@@ -247,7 +261,7 @@ export default function Staff() {
                   display: 'flex', flexDirection: 'column', gap: 1, opacity: OFF_GRID.includes(x.g.status) ? 0.85 : 1,
                   textDecoration: OFF_GRID.includes(x.g.status) ? 'line-through' : 'none',
                 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{x.g.checkedInAt && x.g.status !== 'no_show' ? '✓ ' : ''}{x.g.title}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{x.g.title}</span>
                   {x.span > 1 && (
                     <span style={{ fontSize: 11, lineHeight: 1.3, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                       {fmtTime(x.g.startsAt)}–{fmtTime(x.g.endsAt)} · {st.label}
@@ -264,14 +278,14 @@ export default function Staff() {
       )}
 
       {open && <StaffBookingDetail
-          key={open.groupId} group={open} tz={tz} settings={data.settings} cages={cages}
+          key={open.groupId} group={open} tz={tz} settings={data.settings} cages={cages} perms={perms}
           onClose={() => setOpenId(null)} onChanged={load}
           onMoved={(ymd, text) => { setOpenId(null); setFlash(text); if (ymd !== dayYmd) setDayYmd(ymd); else load(); }}
           onConvert={(g) => { setOpenId(null); setNewOpen({ tab: 'booking', fromHold: g }); }}
           onCustomer={(id) => { setOpenId(null); setCustOpen({ id }); }}
         />}
       {custOpen && data && <StaffCustomer
-          key={custOpen.id || 'search'} initialId={custOpen.id || null} tz={tz}
+          key={custOpen.id || 'search'} initialId={custOpen.id || null} tz={tz} canEdit={perms.edit_customers}
           onClose={() => setCustOpen(null)}
           onBook={(customer) => { setCustOpen(null); setNewOpen({ tab: 'booking', customer }); }}
           onOpenBooking={(g) => {
@@ -282,13 +296,14 @@ export default function Staff() {
           }}
         />}
       {newOpen && data && <StaffNew
-          initial={newOpen} tz={tz} settings={data.settings} cages={cages} canBlock={data.canBlock}
+          initial={newOpen} tz={tz} settings={data.settings} cages={cages} canBlock={data.canBlock} canComp={perms.comp}
           onClose={() => setNewOpen(null)} onDone={done}
         />}
       {openBlock && <StaffBlockDetail
           key={openBlock.id} block={openBlock} cages={cages} tz={tz} step={data.settings.slot_minutes} canEdit={data.canBlock}
           onClose={() => setBlockOpen(null)} onDone={(text) => done(text)}
         />}
+      {alertsOpen && <StaffAlerts onClose={(text) => { setAlertsOpen(false); if (text) setFlash(text); }} />}
     </main>
   );
 }
