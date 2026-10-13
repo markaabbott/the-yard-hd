@@ -8,11 +8,16 @@ import { STATES, LEGEND } from '../lib/staffStates';
 import StaffBookingDetail from '../components/StaffBookingDetail';
 import StaffNew from '../components/StaffNew';
 import StaffBlockDetail from '../components/StaffBlockDetail';
+import StaffCheckIn from '../components/StaffCheckIn';
+import StaffCustomer from '../components/StaffCustomer';
+import StaffReports from '../components/StaffReports';
 
 const RED = '#BA0C2F';
 const FALLBACK_TZ = 'America/Los_Angeles';
 const ROW_H = 30;
 const ROLE_LABEL = { owner: 'Owner', admin: 'Admin', coach: 'Coach' };
+const OFF_GRID = ['canceled', 'no_show'];
+const localYmd = (d, tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(d));
 
 export default function Staff() {
   const { user, loading, signOut } = useAuth();
@@ -26,6 +31,8 @@ export default function Staff() {
   const [flash, setFlash] = useState(null);
   const [newOpen, setNewOpen] = useState(null); // { tab, cageId?, startsAt?, fromHold? }
   const [blockOpen, setBlockOpen] = useState(null);
+  const [view, setView] = useState('schedule'); // schedule | checkin | reports
+  const [custOpen, setCustOpen] = useState(null); // { id? }
 
   useEffect(() => { if (!loading && !user) router.replace('/signin'); }, [loading, user, router]);
 
@@ -65,7 +72,7 @@ export default function Staff() {
     const open = zonedTimeToUtc(dayYmd, oh, om, tz).getTime();
     let gStart = open;
     let gEnd = zonedTimeToUtc(dayYmd, ch, cm, tz).getTime();
-    const groups = data.groups.filter((g) => showCanceled || g.status !== 'canceled');
+    const groups = data.groups.filter((g) => showCanceled || !OFF_GRID.includes(g.status));
     const dayStart = zonedTimeToUtc(dayYmd, 0, 0, tz).getTime();
     const dayEnd = zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz).getTime();
     for (const g of groups) for (const r of g.rows) {
@@ -93,7 +100,7 @@ export default function Staff() {
       const cols = b.scope === 'facility' ? data.cages.map((c) => col.get(c.id)) : [col.get(b.cage_id)].filter(Boolean);
       for (const c of cols) blockItems.push({ key: `${b.id}-${c}`, b, col: c, ...place(b.starts_at, b.ends_at) });
     }
-    const live = data.groups.filter((g) => g.status !== 'canceled');
+    const live = data.groups.filter((g) => !OFF_GRID.includes(g.status));
     return { slots, items, blockItems, liveCount: live.length, canceledCount: data.groups.length - live.length };
   }, [data, dayYmd, tz, showCanceled]);
 
@@ -103,7 +110,7 @@ export default function Staff() {
   const open = openId && data?.groups.find((g) => g.groupId === openId);
   const openBlock = blockOpen && data?.blocks.find((b) => b.id === blockOpen);
   const done = (text, ymd) => {
-    setNewOpen(null); setBlockOpen(null); setOpenId(null); setFlash(text);
+    setNewOpen(null); setBlockOpen(null); setOpenId(null); setCustOpen(null); setFlash(text);
     if (ymd && ymd !== dayYmd) setDayYmd(ymd); else load();
   };
   const isToday = dayYmd === todayYmd(tz);
@@ -128,25 +135,40 @@ export default function Staff() {
 
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 28, textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1 }}>Schedule</div>
-          <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.55)' }}>Click an open slot to book, hold, or block it. Click anything on the grid for details.</div>
+          {data && (
+            <div role="tablist" style={{ display: 'flex', gap: 22, marginBottom: 6 }}>
+              {[['schedule', 'Schedule'], ['checkin', 'Check-in'], ...(data.canBlock ? [['reports', 'Reports']] : [])].map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} style={{
+                  border: 'none', background: 'none', padding: '0 0 6px', cursor: 'pointer',
+                  fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 28, textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1,
+                  color: view === k ? '#111' : 'rgba(0,0,0,.3)', borderBottom: `3px solid ${view === k ? RED : 'transparent'}`,
+                }}>{l}</button>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.55)' }}>
+            {view === 'checkin' ? 'Check people in as they arrive. Collect anything owed first.'
+              : view === 'reports' ? 'Revenue, bookings, and cage use for any date range.'
+              : 'Click an open slot to book, hold, or block it. Click anything on the grid for details.'}
+          </div>
           {data && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               <button onClick={() => setNewOpen({ tab: 'booking' })} style={{ ...newBtn, background: RED, color: '#fff', border: 'none' }}>+ Book for a customer</button>
               <button onClick={() => setNewOpen({ tab: 'hold' })} style={newBtn}>Hold time</button>
               {data.canBlock && <button onClick={() => setNewOpen({ tab: 'block' })} style={newBtn}>Block time</button>}
+              <button onClick={() => setCustOpen({})} style={newBtn}>Customers</button>
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {view !== 'reports' && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn} aria-label="Previous day">‹</button>
           <div style={{ fontWeight: 700, fontSize: 15, minWidth: 200, textAlign: 'center' }}>{labelYmd(dayYmd)}</div>
           <button onClick={() => setDayYmd(addDaysYmd(dayYmd, 1))} style={navBtn} aria-label="Next day">›</button>
           {!isToday && <button onClick={() => setDayYmd(todayYmd(tz))} style={{ ...navBtn, width: 'auto', padding: '0 14px', fontSize: 13, fontWeight: 600 }}>Today</button>}
-        </div>
+        </div>}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
+      {view === 'schedule' && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           {LEGEND.map((k) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'rgba(0,0,0,.65)' }}>
@@ -162,10 +184,10 @@ export default function Staff() {
         {grid && (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'rgba(0,0,0,.65)', cursor: 'pointer' }}>
             <input type="checkbox" checked={showCanceled} onChange={(e) => setShowCanceled(e.target.checked)} />
-            Show canceled ({grid.canceledCount})
+            Show canceled &amp; no-shows ({grid.canceledCount})
           </label>
         )}
-      </div>
+      </div>}
 
       {flash && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, fontSize: 13.5, padding: '10px 14px', borderRadius: 8, marginBottom: 12, background: '#E8F0EA', color: '#14532A' }}>
@@ -180,8 +202,12 @@ export default function Staff() {
           <div style={{ fontSize: 12, color: 'rgba(0,0,0,.45)', fontFamily: 'ui-monospace, monospace' }}>{error}</div>
           <button onClick={load} style={{ padding: '10px 20px', border: 'none', borderRadius: 6, background: RED, color: '#fff', cursor: 'pointer', fontWeight: 600 }}>Try again</button>
         </div>
+      ) : view === 'reports' ? (
+        <StaffReports tz={tz} />
       ) : !grid ? (
         <div style={{ color: 'rgba(0,0,0,.4)', fontSize: 14 }}>Loading schedule…</div>
+      ) : view === 'checkin' ? (
+        <StaffCheckIn groups={data.groups} tz={tz} isToday={isToday} onOpen={setOpenId} onChanged={load} />
       ) : (
         <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
           <div style={{
@@ -215,13 +241,13 @@ export default function Staff() {
               const st = STATES[x.g.payState] || STATES.unpaid;
               return (
                 <button key={x.key} onClick={() => setOpenId(x.g.groupId)} style={{
-                  gridColumn: x.col, gridRow: `${x.row} / span ${x.span}`, margin: 2, zIndex: x.g.status === 'canceled' ? 1 : 2,
+                  gridColumn: x.col, gridRow: `${x.row} / span ${x.span}`, margin: 2, zIndex: OFF_GRID.includes(x.g.status) ? 1 : 2,
                   borderRadius: 5, background: st.bg, color: st.fg, border: st.border || 'none', boxSizing: 'border-box',
                   padding: '5px 8px', textAlign: 'left', cursor: 'pointer', overflow: 'hidden',
-                  display: 'flex', flexDirection: 'column', gap: 1, opacity: x.g.status === 'canceled' ? 0.85 : 1,
-                  textDecoration: x.g.status === 'canceled' ? 'line-through' : 'none',
+                  display: 'flex', flexDirection: 'column', gap: 1, opacity: OFF_GRID.includes(x.g.status) ? 0.85 : 1,
+                  textDecoration: OFF_GRID.includes(x.g.status) ? 'line-through' : 'none',
                 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{x.g.title}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{x.g.checkedInAt && x.g.status !== 'no_show' ? '✓ ' : ''}{x.g.title}</span>
                   {x.span > 1 && (
                     <span style={{ fontSize: 11, lineHeight: 1.3, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                       {fmtTime(x.g.startsAt)}–{fmtTime(x.g.endsAt)} · {st.label}
@@ -242,6 +268,18 @@ export default function Staff() {
           onClose={() => setOpenId(null)} onChanged={load}
           onMoved={(ymd, text) => { setOpenId(null); setFlash(text); if (ymd !== dayYmd) setDayYmd(ymd); else load(); }}
           onConvert={(g) => { setOpenId(null); setNewOpen({ tab: 'booking', fromHold: g }); }}
+          onCustomer={(id) => { setOpenId(null); setCustOpen({ id }); }}
+        />}
+      {custOpen && data && <StaffCustomer
+          key={custOpen.id || 'search'} initialId={custOpen.id || null} tz={tz}
+          onClose={() => setCustOpen(null)}
+          onBook={(customer) => { setCustOpen(null); setNewOpen({ tab: 'booking', customer }); }}
+          onOpenBooking={(g) => {
+            const ymd = localYmd(g.startsAt, tz);
+            setCustOpen(null); setView('schedule'); setShowCanceled(OFF_GRID.includes(g.status));
+            if (ymd !== dayYmd) setDayYmd(ymd);
+            setOpenId(g.groupId);
+          }}
         />}
       {newOpen && data && <StaffNew
           initial={newOpen} tz={tz} settings={data.settings} cages={cages} canBlock={data.canBlock}
