@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabaseClient';
 import { zonedTimeToUtc, todayYmd, addDaysYmd, labelYmd } from '../lib/facilityTime';
 import { STATES, LEGEND } from '../lib/staffStates';
 import StaffBookingDetail from '../components/StaffBookingDetail';
+import StaffNew from '../components/StaffNew';
+import StaffBlockDetail from '../components/StaffBlockDetail';
 
 const RED = '#BA0C2F';
 const FALLBACK_TZ = 'America/Los_Angeles';
@@ -22,6 +24,8 @@ export default function Staff() {
   const [openId, setOpenId] = useState(null);
   const [showCanceled, setShowCanceled] = useState(false);
   const [flash, setFlash] = useState(null);
+  const [newOpen, setNewOpen] = useState(null); // { tab, cageId?, startsAt?, fromHold? }
+  const [blockOpen, setBlockOpen] = useState(null);
 
   useEffect(() => { if (!loading && !user) router.replace('/signin'); }, [loading, user, router]);
 
@@ -47,6 +51,7 @@ export default function Staff() {
     if (!user) return;
     const ch = supabase.channel('staff-reservations')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blocks' }, () => load())
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [user, load]);
@@ -96,6 +101,11 @@ export default function Staff() {
 
   const fmtTime = (d) => new Date(d).toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' });
   const open = openId && data?.groups.find((g) => g.groupId === openId);
+  const openBlock = blockOpen && data?.blocks.find((b) => b.id === blockOpen);
+  const done = (text, ymd) => {
+    setNewOpen(null); setBlockOpen(null); setOpenId(null); setFlash(text);
+    if (ymd && ymd !== dayYmd) setDayYmd(ymd); else load();
+  };
   const isToday = dayYmd === todayYmd(tz);
   const cages = data?.cages || [];
 
@@ -119,7 +129,14 @@ export default function Staff() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 28, textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1 }}>Schedule</div>
-          <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.55)' }}>Click any booking for the customer, payment, and cancel options.</div>
+          <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.55)' }}>Click an open slot to book, hold, or block it. Click anything on the grid for details.</div>
+          {data && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <button onClick={() => setNewOpen({ tab: 'booking' })} style={{ ...newBtn, background: RED, color: '#fff', border: 'none' }}>+ Book for a customer</button>
+              <button onClick={() => setNewOpen({ tab: 'hold' })} style={newBtn}>Hold time</button>
+              {data.canBlock && <button onClick={() => setNewOpen({ tab: 'block' })} style={newBtn}>Block time</button>}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn} aria-label="Previous day">‹</button>
@@ -181,14 +198,18 @@ export default function Staff() {
                   {s.getUTCMinutes() === 0 || r === 0 ? fmtTime(s) : ''}
                 </div>
                 {cages.map((c, i) => (
-                  <div key={c.id} style={{ gridColumn: i + 2, gridRow: r + 2, borderTop: `1px solid rgba(0,0,0,${s.getUTCMinutes() === 0 ? '.08' : '.035'})`, borderLeft: '1px solid rgba(0,0,0,.06)' }} />
+                  <div key={c.id} role="button" tabIndex={-1} aria-label={`New at ${fmtTime(s)}, ${c.name}`}
+                    onClick={() => setNewOpen({ tab: 'booking', cageId: c.id, startsAt: s })}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(186,12,47,.06)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    style={{ gridColumn: i + 2, gridRow: r + 2, cursor: 'pointer', borderTop: `1px solid rgba(0,0,0,${s.getUTCMinutes() === 0 ? '.08' : '.035'})`, borderLeft: '1px solid rgba(0,0,0,.06)' }} />
                 ))}
               </React.Fragment>
             ))}
             {grid.blockItems.map((x) => (
-              <div key={x.key} title={x.b.reason || 'Blocked'} style={{ gridColumn: x.col, gridRow: `${x.row} / span ${x.span}`, margin: 2, borderRadius: 5, background: 'repeating-linear-gradient(45deg,#D9D6D1 0 6px,#EFEDE9 6px 12px)', fontSize: 11.5, fontWeight: 600, color: 'rgba(0,0,0,.6)', padding: '6px 8px', overflow: 'hidden' }}>
+              <button key={x.key} onClick={() => setBlockOpen(x.b.id)} title={x.b.reason || 'Blocked'} style={{ gridColumn: x.col, gridRow: `${x.row} / span ${x.span}`, margin: 2, zIndex: 2, border: 'none', cursor: 'pointer', textAlign: 'left', alignSelf: 'stretch', display: 'block', borderRadius: 5, background: 'repeating-linear-gradient(45deg,#D9D6D1 0 6px,#EFEDE9 6px 12px)', fontSize: 11.5, fontWeight: 600, color: 'rgba(0,0,0,.6)', padding: '6px 8px', overflow: 'hidden' }}>
                 {x.b.reason || 'Blocked'}
-              </div>
+              </button>
             ))}
             {grid.items.map((x) => {
               const st = STATES[x.g.payState] || STATES.unpaid;
@@ -220,10 +241,20 @@ export default function Staff() {
           key={open.groupId} group={open} tz={tz} settings={data.settings} cages={cages}
           onClose={() => setOpenId(null)} onChanged={load}
           onMoved={(ymd, text) => { setOpenId(null); setFlash(text); if (ymd !== dayYmd) setDayYmd(ymd); else load(); }}
+          onConvert={(g) => { setOpenId(null); setNewOpen({ tab: 'booking', fromHold: g }); }}
+        />}
+      {newOpen && data && <StaffNew
+          initial={newOpen} tz={tz} settings={data.settings} cages={cages} canBlock={data.canBlock}
+          onClose={() => setNewOpen(null)} onDone={done}
+        />}
+      {openBlock && <StaffBlockDetail
+          key={openBlock.id} block={openBlock} cages={cages} tz={tz} step={data.settings.slot_minutes} canEdit={data.canBlock}
+          onClose={() => setBlockOpen(null)} onDone={(text) => done(text)}
         />}
     </main>
   );
 }
 
 const navBtn = { width: 36, height: 36, borderRadius: 7, border: '1px solid rgba(0,0,0,.15)', background: '#fff', cursor: 'pointer', fontSize: 16 };
+const newBtn = { minHeight: 38, padding: '0 14px', borderRadius: 7, border: '1px solid rgba(0,0,0,.18)', background: '#fff', color: '#111', cursor: 'pointer', fontSize: 13, fontWeight: 700 };
 const head = { padding: '0 12px', fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', borderBottom: '1px solid rgba(0,0,0,.1)', background: '#faf9f7', display: 'flex', alignItems: 'center', position: 'sticky', top: 0 };
