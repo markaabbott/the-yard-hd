@@ -11,6 +11,10 @@ const ACTIONS = {
   hold: 'staff_hold',
   block_save: 'save_block',
   block_delete: 'delete_block',
+  check_in: 'staff_check_in',
+  undo_check_in: 'staff_undo_check_in',
+  no_show: 'staff_no_show',
+  undo_no_show: 'staff_undo_no_show',
 };
 
 export default async function handler(req, res) {
