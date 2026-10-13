@@ -1,4 +1,4 @@
-// GET /api/staff/reports?start=ISO&end=ISO[&format=csv]   admin / owner only
+// GET /api/staff/reports?start=ISO&end=ISO[&format=csv]   admin / owner, or coaches if allowed on Team
 // Money is counted when it moved (payment created in the range). Bookings and
 // cage use are counted by when the booking starts.
 import { supabaseAdmin as admin } from '../../../lib/supabaseAdmin';
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end('Method not allowed');
   const who = await requireStaff(req, res);
   if (!who) return;
-  if (!['admin', 'owner'].includes(who.role)) return res.status(403).json({ error: 'Reports are for admins and owners.' });
+  if (!who.perms.reports) return res.status(403).json({ error: 'Ask an admin for access to reports.' });
 
   const { start, end, format } = req.query;
   if (!start || !end || !(new Date(end) > new Date(start))) return res.status(400).json({ error: 'Pick a valid date range.' });

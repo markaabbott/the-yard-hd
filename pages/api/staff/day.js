@@ -35,7 +35,7 @@ export default async function handler(req, res) {
       .select('id, group_id, cage_id, starts_at, ends_at, kind, status, user_id, guest_name, guest_phone, team_name, party_name, contact_name, contact_phone, guest_count, notes, hold_expires_at, canceled_at, created_at, checked_in_at, no_show_at')
       .in('status', ['pending_payment', 'scheduled', 'confirmed', 'completed', 'canceled', 'no_show'])
       .lt('starts_at', end).gt('ends_at', start).order('starts_at'),
-    admin.from('blocks').select('id, cage_id, scope, starts_at, ends_at, reason, created_at').lt('starts_at', end).gt('ends_at', start),
+    admin.from('blocks').select('id, cage_id, scope, starts_at, ends_at, reason, created_at, repeat_id, repeat_rule').lt('starts_at', end).gt('ends_at', start),
   ]);
   const failed = [s, c, r, b].find((x) => x.error);
   if (failed) return res.status(500).json({ error: failed.error.message });
@@ -100,7 +100,8 @@ export default async function handler(req, res) {
 
   res.status(200).json({
     role: who.role,
-    canBlock: ['admin', 'owner'].includes(who.role),
+    canBlock: who.perms.block,
+    perms: who.perms,
     settings: s.data,
     cages: c.data || [],
     blocks: b.data || [],

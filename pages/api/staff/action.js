@@ -11,8 +11,8 @@ const ACTIONS = {
   hold: 'staff_hold',
   block_save: 'save_block',
   block_delete: 'delete_block',
-  check_in: 'staff_check_in',
-  undo_check_in: 'staff_undo_check_in',
+  block_repeat: 'save_block_repeat',
+  block_repeat_delete: 'delete_block_repeat',
   no_show: 'staff_no_show',
   undo_no_show: 'staff_undo_no_show',
 };
@@ -37,8 +37,7 @@ export default async function handler(req, res) {
     return res.status(status).json({ error: error.message });
   }
 
-  if (['book', 'collect', 'settle'].includes(action)) {
-    try { await drainNotifications(); } catch (e) { console.error('[staff/action] email drain', e.message); }
-  }
+  // Receipts and staff alerts (blocks, staff bookings) go out right away.
+  try { await drainNotifications(); } catch (e) { console.error('[staff/action] email drain', e.message); }
   res.status(200).json({ result: data ?? null });
 }
