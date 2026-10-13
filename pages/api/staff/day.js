@@ -13,6 +13,7 @@ function payState(g, charge) {
   if (g.kind === 'clinic') return 'clinic';
   if (g.kind === 'staff_hold') return 'hold';
   if (g.kind === 'donated') return 'donated';
+  if (!charge && g.payments.some((x) => x.entry_type === 'comp' && x.status === 'succeeded')) return 'comp';
   if (charge) return charge.is_deposit && charge.balance_due_cents > 0 && !charge.balance_settled_at ? 'balance' : 'paid';
   if (g.kind === 'membership') return 'member';
   return 'unpaid';
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
       .select('id, group_id, cage_id, starts_at, ends_at, kind, status, user_id, guest_name, guest_phone, team_name, party_name, contact_name, contact_phone, guest_count, notes, hold_expires_at, canceled_at, created_at')
       .in('status', ['pending_payment', 'scheduled', 'confirmed', 'completed', 'canceled'])
       .lt('starts_at', end).gt('ends_at', start).order('starts_at'),
-    admin.from('blocks').select('id, cage_id, scope, starts_at, ends_at, reason').lt('starts_at', end).gt('ends_at', start),
+    admin.from('blocks').select('id, cage_id, scope, starts_at, ends_at, reason, created_at').lt('starts_at', end).gt('ends_at', start),
   ]);
   const failed = [s, c, r, b].find((x) => x.error);
   if (failed) return res.status(500).json({ error: failed.error.message });
@@ -86,11 +87,18 @@ export default async function handler(req, res) {
     g.refundedCents = g.payments.filter((x) => x.entry_type === 'refund' && x.status === 'succeeded').reduce((a, x) => a - x.amount_cents, 0);
     g.refundFailed = g.payments.some((x) => x.entry_type === 'refund' && x.status === 'failed');
     g.stripePaymentIntent = charge?.stripe_payment_intent_id || null;
+    // Booked by staff as pay-at-facility: the charge row stays open until collected.
+    const open = ['scheduled', 'confirmed'].includes(g.status) && g.payments.find((x) => x.entry_type === 'charge' && x.status === 'requires_payment');
+    g.dueCents = open ? open.amount_cents : 0;
+    g.openPaymentId = open ? open.id : null;
+    g.depositPaymentId = charge?.is_deposit && !charge.balance_settled_at && charge.balance_due_cents > 0 ? charge.id : null;
+    g.comp = g.payments.find((x) => x.entry_type === 'comp' && x.status === 'succeeded')?.memo || null;
     g.payState = payState(g, charge);
   }
 
   res.status(200).json({
     role: who.role,
+    canBlock: ['admin', 'owner'].includes(who.role),
     settings: s.data,
     cages: c.data || [],
     blocks: b.data || [],
