@@ -33,7 +33,7 @@ const PAYS = [
   { k: 'comp', t: 'No charge' },
 ];
 
-export default function StaffNew({ initial = {}, tz, settings, cages = [], canBlock, onClose, onDone }) {
+export default function StaffNew({ initial = {}, tz, settings, cages = [], canBlock, canComp = true, onClose, onDone }) {
   const fromHold = initial.fromHold || null;
   const step = settings?.slot_minutes || 30;
   const openM = toMin(settings?.open_time || '09:00');
@@ -53,13 +53,14 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const [working, setWorking] = useState(false);
 
   // Booking
-  const [who, setWho] = useState('account'); // account | new | guest
-  const [cust, setCust] = useState(initial.customer || null);
+  const walkSeed = initial.customer?.type === 'walkin' ? initial.customer : null;
+  const [who, setWho] = useState(walkSeed ? 'guest' : 'account'); // account | new | guest
+  const [cust, setCust] = useState(walkSeed ? null : initial.customer || null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [nc, setNc] = useState({ firstName: '', lastName: '', email: '', phone: '' });
-  const [guest, setGuest] = useState({ name: '', phone: '' });
+  const [guest, setGuest] = useState({ name: walkSeed?.name || '', phone: walkSeed?.phone || '' });
   const [kind, setKind] = useState('drop_in');
   const [party, setParty] = useState({ name: '', count: '' });
   const [pay, setPay] = useState('card');
@@ -86,7 +87,11 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const [endTime, setEndTime] = useState(hmOf(Math.min(toMin(start0.hm) + 60, 23 * 60 + 30)));
   const [reason, setReason] = useState('');
   const [conflicts, setConflicts] = useState(null);
-
+  const wd0 = new Date(`${start0.ymd}T12:00:00Z`).getUTCDay();
+  const [repeat, setRepeat] = useState('none'); // none | weekly | biweekly
+  const [days, setDays] = useState([wd0]);
+  const [until, setUntil] = useState(addDaysYmd(start0.ymd, 7 * 12));
+  const [skipList, setSkipList] = useState(null); // conflicts from a repeat check
   const startsAt = useMemo(() => at(date, time, tz), [date, time, tz]);
   const endsAt = new Date(startsAt.getTime() + dur * 60000);
   const memberOk = who !== 'guest' && cust?.memberHours != null;
@@ -154,6 +159,30 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
     setWorking(false);
   }
 
+  const pickResult = (r) => {
+    if (r.type === 'walkin') { setWho('guest'); setGuest({ name: r.name, phone: r.phone || '' }); setQuery(''); return; }
+    setCust(r);
+  };
+
+  // Repeating block: one occurrence per chosen weekday, every week or every other week.
+  const repeating = tab === 'block' && repeat !== 'none';
+  const occurrences = useMemo(() => {
+    if (!repeating || !days.length || !until || until < date) return [];
+    const out = [];
+    const weekStart = addDaysYmd(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
+    for (let d = date; d <= until && out.length < 260; d = addDaysYmd(d, 1)) {
+      const wd = new Date(`${d}T12:00:00Z`).getUTCDay();
+      if (!days.includes(wd)) continue;
+      if (repeat === 'biweekly') {
+        const weeks = Math.floor((Date.parse(`${d}T12:00:00Z`) - Date.parse(`${weekStart}T12:00:00Z`)) / (7 * 86400000));
+        if (weeks % 2) continue;
+      }
+      out.push(d);
+    }
+    return out;
+  }, [repeating, repeat, days.join(','), date, until]);
+  useEffect(() => { setSkipList(null); setConflicts(null); }, [repeat, days.join(','), date, until, time, endTime, allDay, scope, cageIds.join(',')]);
+
   const book = () => run(async () => {
     let c = cust;
     if (who === 'new') {
@@ -202,6 +231,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   });
 
   const block = () => run(async () => {
+    if (repeating) return blockRepeat(false);
     const s = allDay ? at(date, '00:00', tz) : startsAt;
     const e = allDay ? at(addDaysYmd(endDate, 1), '00:00', tz) : at(endDate, endTime, tz);
     if (e <= s) throw new Error('The block has to end after it starts.');
@@ -213,6 +243,25 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
     if (!r.ok) { setConflicts(r.conflicts || []); return; }
     onDone(`Blocked ${scope === 'facility' ? 'the whole facility' : cageList}${reason.trim() ? ` (${reason.trim()})` : ''}.`, date);
   });
+
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const ruleText = () => {
+    const ds = [1, 2, 3, 4, 5, 6, 0].filter((d) => days.includes(d)).map((d) => DAYS[d]).join(', ');
+    return `${repeat === 'biweekly' ? 'Every other week' : 'Every week'} on ${ds} · ${allDay ? 'all day' : `${hmLabel(time)}–${hmLabel(endTime)}`} · through ${shortDate(until)}`;
+  };
+  async function blockRepeat(skip) {
+    if (!occurrences.length) throw new Error('No dates match. Pick at least one day and an end date after the start.');
+    if (!allDay && toMin(endTime) <= toMin(time)) throw new Error('The block has to end after it starts.');
+    const starts = occurrences.map((d) => (allDay ? at(d, '00:00', tz) : at(d, time, tz)).toISOString());
+    const ends = occurrences.map((d) => (allDay ? at(addDaysYmd(d, 1), '00:00', tz) : at(d, endTime, tz)).toISOString());
+    const r = await staffAction('block_repeat', {
+      p_cage_ids: scope === 'facility' ? null : cageIds, p_starts: starts, p_ends: ends,
+      p_reason: reason.trim() || null, p_rule: ruleText(), p_skip_conflicts: skip,
+    });
+    if (!r.ok) { setSkipList(r.conflicts || []); return; }
+    onDone(`Blocked ${scope === 'facility' ? 'the whole facility' : cageList} on ${r.made} date${r.made === 1 ? '' : 's'}${reason.trim() ? ` (${reason.trim()})` : ''}.${r.skipped ? ` Skipped ${r.skipped} with bookings in the way.` : ''}`, date);
+  }
+  const blockSkipping = () => run(() => blockRepeat(true));
 
   function close() {
     if (card && !card.paid) releaseHold(card.groupId);
@@ -284,13 +333,13 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                     </div>
                   ) : who === 'account' ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, or phone" style={field} />
+                      <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, phone, or team" style={field} />
                       {query.trim().length >= 2 && (
                         <div style={{ border: '1px solid rgba(0,0,0,.1)', borderRadius: 8, overflow: 'hidden' }}>
                           {results.map((r, i) => (
-                            <button key={r.id} onClick={() => setCust(r)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderTop: i ? '1px solid rgba(0,0,0,.07)' : 'none', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <span style={{ fontSize: 13.5, fontWeight: 700, color: '#111' }}>{r.name}{r.memberHours != null ? <span style={{ color: RED, fontWeight: 600 }}> · member</span> : null}</span>
-                              <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{[r.email, r.phone].filter(Boolean).join(' · ')}</span>
+                            <button key={r.id} onClick={() => pickResult(r)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderTop: i ? '1px solid rgba(0,0,0,.07)' : 'none', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 13.5, fontWeight: 700, color: '#111' }}>{r.name}{r.type === 'walkin' ? <span style={{ color: 'rgba(0,0,0,.5)', fontWeight: 600 }}> · walk-in</span> : null}{r.memberHours != null ? <span style={{ color: RED, fontWeight: 600 }}> · member</span> : null}</span>
+                              <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{[...(r.teams || []), r.email, r.phone].filter(Boolean).join(' · ')}</span>
                             </button>
                           ))}
                           {!results.length && <div style={{ padding: '10px 12px', fontSize: 13, color: 'rgba(0,0,0,.5)' }}>{searching ? 'Searching…' : 'No one matches.'}</div>}
@@ -361,19 +410,45 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                       <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> All day
                     </label>
                     <div style={grid2}>
-                      <label style={fieldLabel}>{allDay ? 'From' : 'Starts'}
+                      <label style={fieldLabel}>{repeating ? (allDay ? 'First date' : 'First date') : allDay ? 'From' : 'Starts'}
                         <input type="date" value={date} onChange={(e) => { setDate(e.target.value); if (e.target.value > endDate) setEndDate(e.target.value); }} style={field} />
                       </label>
-                      {!allDay && <label style={fieldLabel}>&nbsp;
+                      {!allDay && <label style={fieldLabel}>{repeating ? 'From' : '\u00a0'}
                         <select value={time} onChange={(e) => setTime(e.target.value)} style={field}>{allTimes.map((t) => <option key={t} value={t}>{hmLabel(t)}</option>)}</select>
                       </label>}
-                      <label style={fieldLabel}>{allDay ? 'Through' : 'Ends'}
+                      {!repeating && <label style={fieldLabel}>{allDay ? 'Through' : 'Ends'}
                         <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} style={field} />
-                      </label>
-                      {!allDay && <label style={fieldLabel}>&nbsp;
+                      </label>}
+                      {!allDay && <label style={fieldLabel}>{repeating ? 'To' : '\u00a0'}
                         <select value={endTime} onChange={(e) => setEndTime(e.target.value)} style={field}>{allTimes.map((t) => <option key={t} value={t}>{hmLabel(t)}</option>)}</select>
                       </label>}
                     </div>
+
+                    <div style={{ ...label_, marginTop: 10 }}>Repeat</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 6 }}>
+                      {[{ k: 'none', t: 'Doesn\u2019t repeat' }, { k: 'weekly', t: 'Every week' }, { k: 'biweekly', t: 'Every 2 weeks' }].map((o) => (
+                        <button key={o.k} onClick={() => setRepeat(o.k)} style={choice(repeat === o.k)}>{o.t}</button>
+                      ))}
+                    </div>
+                    {repeating && (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0,1fr))', gap: 4 }}>
+                          {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+                            const on = days.includes(d);
+                            return <button key={d} aria-pressed={on} onClick={() => setDays((xs) => (on ? xs.filter((x) => x !== d) : [...xs, d]))} style={{ minHeight: 38, borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', border: `1px solid ${on ? '#111' : 'rgba(0,0,0,.18)'}` }}>{DAYS[d]}</button>;
+                          })}
+                        </div>
+                        <label style={fieldLabel}>Repeat through
+                          <input type="date" value={until} min={date} max={addDaysYmd(date, 366)} onChange={(e) => setUntil(e.target.value)} style={field} />
+                        </label>
+                        <div style={hint}>
+                          {occurrences.length
+                            ? `${occurrences.length} date${occurrences.length === 1 ? '' : 's'}: ${shortDate(occurrences[0])}${occurrences.length > 1 ? ` … ${shortDate(occurrences[occurrences.length - 1])}` : ''}.`
+                            : 'No dates match yet. Pick a day and an end date.'}
+                          {' '}Each date is its own block, so one can be changed or removed later without touching the rest.
+                        </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.2fr) minmax(0,1fr) minmax(0,.8fr)', gap: 8 }}>
@@ -423,7 +498,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                   <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={label_}>Payment</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 6 }}>
-                      {PAYS.map((p) => <button key={p.k} onClick={() => setPay(p.k)} style={choice(pay === p.k)}>{p.t}</button>)}
+                      {PAYS.filter((p) => canComp || p.k !== 'comp').map((p) => <button key={p.k} onClick={() => setPay(p.k)} style={choice(pay === p.k)}>{p.t}</button>)}
                     </div>
                     {pay === 'comp' && <input value={compMemo} onChange={(e) => setCompMemo(e.target.value)} placeholder="Why is it free? (required)" style={field} />}
                     <div style={{ border: '1px solid rgba(0,0,0,.1)', borderRadius: 8, fontSize: 14 }}>
@@ -455,6 +530,27 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                 </>
               )}
 
+              {skipList && (
+                <div style={{ border: `1px solid rgba(186,12,47,.35)`, borderRadius: 8, padding: '12px 13px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(186,12,47,.04)' }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: RED }}>
+                    {new Set(skipList.map((c) => c.occurrence)).size} of {occurrences.length} dates have bookings in the way.
+                  </div>
+                  {skipList.slice(0, 8).map((c) => (
+                    <div key={`${c.occurrence}-${c.group_id}`} style={{ fontSize: 13, lineHeight: 1.45 }}>
+                      <strong>{c.title}</strong>{c.kind === 'staff_hold' ? ' (hold)' : ''}<br />
+                      <span style={{ color: 'rgba(0,0,0,.6)' }}>{fmtRange(c.starts_at, c.ends_at)} · {c.cages}</span>
+                    </div>
+                  ))}
+                  {skipList.length > 8 && <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>and {skipList.length - 8} more</div>}
+                  <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.6)', lineHeight: 1.5 }}>Move or cancel them and try again, or block the other dates now and leave these open.</div>
+                  {new Set(skipList.map((c) => c.occurrence)).size < occurrences.length && (
+                    <button disabled={working} onClick={blockSkipping} style={{ minHeight: 40, borderRadius: 6, border: '1px solid rgba(0,0,0,.2)', background: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                      Block the other {occurrences.length - new Set(skipList.map((c) => c.occurrence)).size} dates
+                    </button>
+                  )}
+                </div>
+              )}
+
               {conflicts && (
                 <div style={{ border: `1px solid rgba(186,12,47,.35)`, borderRadius: 8, padding: '12px 13px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(186,12,47,.04)' }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: RED }}>
@@ -478,7 +574,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                 </button>
               )}
               {tab === 'hold' && <button disabled={working || !canHold} onClick={hold} style={primary(working || !canHold, '#000')}>{working ? 'Holding…' : 'Hold this time'}</button>}
-              {tab === 'block' && <button disabled={working || !canBlockNow} onClick={block} style={primary(working || !canBlockNow, '#000')}>{working ? 'Checking…' : 'Block this time'}</button>}
+              {tab === 'block' && <button disabled={working || !canBlockNow || (repeating && !occurrences.length)} onClick={block} style={primary(working || !canBlockNow || (repeating && !occurrences.length), '#000')}>{working ? 'Checking…' : repeating ? `Block ${occurrences.length} date${occurrences.length === 1 ? '' : 's'}` : 'Block this time'}</button>}
             </div>
           </>
         )}

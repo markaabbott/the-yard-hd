@@ -91,7 +91,7 @@ export default function StaffReports({ tz }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
           {kpi('Net revenue', money(r.money.netCents), `${money(r.money.grossCents)} collected · ${money(r.money.refundsCents)} refunds · ${money(r.money.feesCents)} card fees`)}
           {kpi('By method', money(r.money.grossCents), `Card ${money(r.money.method.card)} · Cash ${money(r.money.method.cash)} · Check ${money(r.money.method.check)}`)}
-          {kpi('Bookings', r.bookings.total, `${r.bookings.checkedIn} checked in · ${r.bookings.noShows} no-shows · ${r.bookings.canceled} canceled`)}
+          {kpi('Bookings', r.bookings.total, `${r.bookings.noShows} no-shows · ${r.bookings.canceled} canceled`)}
           {kpi('Still owed', money(r.owed.cents), r.owed.count ? `On ${r.owed.count} booking${r.owed.count === 1 ? '' : 's'} still on the books, any date` : 'Nothing outstanding', r.owed.cents ? '#8A5A00' : null)}
         </div>
 

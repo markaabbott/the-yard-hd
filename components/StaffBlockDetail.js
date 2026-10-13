@@ -21,6 +21,7 @@ export default function StaffBlockDetail({ block: b, cages = [], tz, step = 30, 
   const [conflicts, setConflicts] = useState(null);
   const [err, setErr] = useState(null);
   const [working, setWorking] = useState(false);
+  const [scopeDel, setScopeDel] = useState('one'); // one | after | all
 
   const where = b.scope === 'facility' ? 'Whole facility' : cages.find((c) => c.id === b.cage_id)?.name || 'Cage';
   const fmt = (d) => new Date(d).toLocaleString([], { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -46,6 +47,11 @@ export default function StaffBlockDetail({ block: b, cages = [], tz, step = 30, 
   async function remove() {
     setWorking(true); setErr(null);
     try {
+      if (b.repeat_id && scopeDel !== 'one') {
+        const n = await staffAction('block_repeat_delete', { p_repeat_id: b.repeat_id, p_from: scopeDel === 'after' ? b.starts_at : null });
+        onDone(`Removed ${n} repeating block${n === 1 ? '' : 's'}${scopeDel === 'after' ? ' from this date on' : ''}.`);
+        return;
+      }
       await staffAction('block_delete', { p_id: b.id });
       onDone(`Block removed. ${where} is open for booking again.`);
     } catch (e) { setErr(e.message); setWorking(false); }
@@ -65,6 +71,7 @@ export default function StaffBlockDetail({ block: b, cages = [], tz, step = 30, 
           </div>
           <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 24, lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '.02em' }}>{b.reason || 'Blocked'}</div>
           <div style={{ fontSize: 14, lineHeight: 1.5 }}>{whenText}</div>
+          {b.repeat_id && <div style={{ fontSize: 13, lineHeight: 1.5, color: 'rgba(0,0,0,.6)' }}>↻ {b.repeat_rule || 'Repeating block'}</div>}
         </div>
 
         <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
@@ -100,7 +107,15 @@ export default function StaffBlockDetail({ block: b, cages = [], tz, step = 30, 
 
         {canEdit && (
           <div style={{ padding: '16px 24px 22px', borderTop: '1px solid rgba(0,0,0,.08)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {mode === 'delete' && <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>Remove this block? {where} opens for booking right away.</div>}
+            {mode === 'edit' && b.repeat_id && <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>Changes apply to this date only.</div>}
+            {mode === 'delete' && !b.repeat_id && <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>Remove this block? {where} opens for booking right away.</div>}
+            {mode === 'delete' && b.repeat_id && (
+              <div role="radiogroup" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[['one', 'This date only'], ['after', 'This date and every one after it'], ['all', 'Every date in the repeat']].map(([k, t]) => (
+                  <button key={k} role="radio" aria-checked={scopeDel === k} onClick={() => setScopeDel(k)} style={{ textAlign: 'left', minHeight: 42, padding: '0 12px', borderRadius: 7, cursor: 'pointer', fontSize: 13.5, fontWeight: 700, background: scopeDel === k ? '#FBEDEF' : '#fff', border: `1.5px solid ${scopeDel === k ? RED : 'rgba(0,0,0,.15)'}`, color: '#111' }}>{t}</button>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               {mode ? (
                 <>

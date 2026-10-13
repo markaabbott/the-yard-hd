@@ -20,7 +20,7 @@ function localParts(d, tz) {
 const hmLabel = (hm) => { const [h, m] = hm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
-export default function StaffBookingDetail({ group: g, tz, settings, cages = [], onClose, onChanged, onMoved, onConvert, onCustomer }) {
+export default function StaffBookingDetail({ group: g, tz, settings, cages = [], perms = {}, onClose, onChanged, onMoved, onConvert, onCustomer }) {
   const [mode, setMode] = useState(null); // null | 'cancel' | 'move' | 'collect'
   const [collectSecret, setCollectSecret] = useState(null);
   const isHold = g.kind === 'staff_hold';
@@ -51,7 +51,6 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
   const footer = live || (g.status === 'completed' && canCollect);
   const arrival = ['drop_in', 'membership', 'team', 'party'].includes(g.kind) && ['confirmed', 'completed', 'no_show'].includes(g.status);
   const started = new Date(g.startsAt) <= new Date();
-  const canCheckIn = new Date(g.startsAt) - Date.now() <= 2 * 3600000;
 
   async function door(action, text) {
     setWorking(true);
@@ -231,28 +230,18 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
 
           </>)}
 
-          {arrival && (
+          {arrival && (g.status === 'no_show' || started) && (
             <section>
-              <div style={label}>Arrival</div>
+              <div style={label}>Attendance</div>
               {g.status === 'no_show' ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 14 }}>
                   <span style={{ color: RED, fontWeight: 700 }}>No-show{g.noShowAt ? ` · marked ${fmtStamp(g.noShowAt)}` : ''}</span>
                   <button disabled={working} onClick={() => door('undo_no_show', 'No-show undone. The booking is back on the schedule.')} style={linkBtn}>Undo</button>
                 </div>
-              ) : g.checkedInAt ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 14 }}>
-                  <span style={{ color: '#14532A', fontWeight: 700 }}>✓ Checked in {fmtStamp(g.checkedInAt)}</span>
-                  <button disabled={working} onClick={() => door('undo_check_in', 'Check-in undone.')} style={linkBtn}>Undo</button>
-                </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.6)' }}>
-                    {owed > 0 ? `Collect the ${money(owed)} due before checking in.` : !canCheckIn ? 'Check-in opens 2 hours before the start time.' : started ? 'Not here yet.' : 'Expected.'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {owed === 0 && canCheckIn && <button disabled={working} onClick={() => door('check_in', 'Checked in.')} style={{ ...secondaryBtn, fontWeight: 700, color: '#fff', background: RED, border: 'none' }}>Check in</button>}
-                    {started && <button disabled={working} onClick={() => door('no_show', `Marked as a no-show. The cage is open again${g.chargeCents ? '; what they paid is kept' : ''}.`)} style={{ ...secondaryBtn, fontWeight: 700, color: RED, border: `1px solid ${RED}` }}>No-show</button>}
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <span style={{ fontSize: 13.5, color: 'rgba(0,0,0,.6)' }}>Didn&rsquo;t show up?</span>
+                  <button disabled={working} onClick={() => door('no_show', `Marked as a no-show. The cage is open again${g.chargeCents ? '; what they paid is kept' : ''}.`)} style={{ ...secondaryBtn, flex: 'none', padding: '0 16px', fontWeight: 700, color: RED, border: `1px solid ${RED}` }}>Mark no-show</button>
                 </div>
               )}
             </section>
@@ -370,8 +359,10 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
             {!mode && live && (
               <div style={{ display: 'flex', gap: 8 }}>
                 {isHold && onConvert && <button onClick={() => onConvert(g)} style={{ ...secondaryBtn, fontWeight: 700, color: '#fff', background: RED, border: 'none' }}>Book it</button>}
-                <button onClick={() => { setMode('move'); setNotice(null); }} style={{ ...secondaryBtn, fontWeight: 700, color: '#111' }}>Move</button>
-                <button onClick={() => { setMode('cancel'); setNotice(null); }} style={{ ...secondaryBtn, flex: isHold ? 1 : 1.4, fontWeight: 700, color: RED, border: `1px solid ${RED}` }}>{isHold ? 'Release' : 'Cancel this booking'}</button>
+                {perms.move && <button onClick={() => { setMode('move'); setNotice(null); }} style={{ ...secondaryBtn, fontWeight: 700, color: '#111' }}>Move</button>}
+                {!perms.refund && g.chargeCents > 0 ? (
+                  <div style={{ flex: 1.4, fontSize: 12.5, lineHeight: 1.45, color: 'rgba(0,0,0,.55)', alignSelf: 'center' }}>Paid booking. An admin has to cancel it, since that issues a refund.</div>
+                ) : <button onClick={() => { setMode('cancel'); setNotice(null); }} style={{ ...secondaryBtn, flex: isHold ? 1 : 1.4, fontWeight: 700, color: RED, border: `1px solid ${RED}` }}>{isHold ? 'Release' : 'Cancel this booking'}</button>}
               </div>
             )}
           </div>

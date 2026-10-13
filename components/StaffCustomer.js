@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { searchCustomers, getCustomer, updateCustomer } from '../lib/staffApi';
 
 const RED = '#BA0C2F';
-const GREEN = '#14532A';
 const money = (c) => `$${(Math.abs(c) / 100).toFixed(2)}`;
 const label = { fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: 'rgba(0,0,0,.5)', marginBottom: 8 };
 const STATUS = { confirmed: 'Booked', scheduled: 'Scheduled', completed: 'Done', canceled: 'Canceled', no_show: 'No-show', pending_payment: 'Checking out' };
 
 // Right-side drawer: find a customer, then their profile, history, and staff notes.
-export default function StaffCustomer({ initialId = null, tz, onClose, onBook, onOpenBooking }) {
+export default function StaffCustomer({ initialId = null, tz, canEdit = true, onClose, onBook, onOpenBooking }) {
   const [id, setId] = useState(initialId);
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
@@ -18,6 +17,7 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
   const [savingNotes, setSavingNotes] = useState(false);
   const [edit, setEdit] = useState(null);
   const [showPast, setShowPast] = useState(false);
+  const walk = c?.type === 'walkin';
 
   useEffect(() => {
     if (id) return;
@@ -29,7 +29,7 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
   useEffect(() => {
     if (!id) return;
     setC(null); setErr(null); setEdit(null); setShowPast(false);
-    getCustomer(id).then((b) => { setC(b.customer); setNotes(b.customer.notes); }).catch((e) => setErr(e.message));
+    getCustomer(id).then((b) => { setC(b.customer); setNotes(b.customer.notes || ''); }).catch((e) => setErr(e.message));
   }, [id]);
 
   const fmtDay = (d) => new Date(d).toLocaleDateString(undefined, { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', year: new Date(d).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
@@ -52,7 +52,7 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
         <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{g.kindLabel}{g.title ? ` · ${g.title}` : ''} · {g.cages.join(', ')}</span>
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: g.status === 'no_show' ? RED : g.checkedInAt ? GREEN : 'rgba(0,0,0,.55)' }}>{g.checkedInAt && g.status !== 'no_show' ? 'Checked in' : STATUS[g.status] || g.status}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: g.status === 'no_show' ? RED : 'rgba(0,0,0,.55)' }}>{STATUS[g.status] || g.status}</span>
         {g.owedCents > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: '#8A5A00' }}>Owes {money(g.owedCents)}</span>}
       </span>
     </button>
@@ -70,17 +70,20 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
             <button onClick={onClose} aria-label="Close" style={{ width: 32, height: 32, border: 'none', background: 'none', cursor: 'pointer', fontSize: 16, color: 'rgba(0,0,0,.45)' }}>✕</button>
           </div>
           {!id && (
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, or phone" style={field} />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, phone, or team" style={field} />
           )}
           {c && !edit && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 24, lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '.02em' }}>{c.name}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, lineHeight: 1.5 }}>
-                <a href={`mailto:${c.email}`} style={{ color: '#111' }}>{c.email}</a>
-                {c.phone ? <a href={`tel:${c.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{c.phone}</a> : <span style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</span>}
-                <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.5)' }}>Customer since {new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
+                {walk && <span style={{ alignSelf: 'flex-start', padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)', marginBottom: 2 }}>Walk-in · no account</span>}
+                {c.email && <a href={`mailto:${c.email}`} style={{ color: '#111' }}>{c.email}</a>}
+                {(walk ? c.phones : [c.phone].filter(Boolean)).map((ph) => <a key={ph} href={`tel:${ph.replace(/\D/g, '')}`} style={{ color: '#111' }}>{ph}</a>)}
+                {!(walk ? c.phones.length : c.phone) && <span style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</span>}
+                {c.teams?.length > 0 && <span style={{ fontSize: 13 }}>{c.teams.join(' · ')}</span>}
+                <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.5)' }}>{walk ? 'First booking' : 'Customer since'} {new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
               </div>
-              <button onClick={() => setEdit({ firstName: c.firstName, lastName: c.lastName, phone: c.phone || '' })} style={{ alignSelf: 'flex-start', border: 'none', background: 'none', padding: '4px 0', cursor: 'pointer', fontSize: 13, color: 'rgba(0,0,0,.6)', textDecoration: 'underline' }}>Edit name or phone</button>
+              {!walk && canEdit && <button onClick={() => setEdit({ firstName: c.firstName, lastName: c.lastName, phone: c.phone || '' })} style={{ alignSelf: 'flex-start', border: 'none', background: 'none', padding: '4px 0', cursor: 'pointer', fontSize: 13, color: 'rgba(0,0,0,.6)', textDecoration: 'underline' }}>Edit name or phone</button>}
             </div>
           )}
           {c && edit && (
@@ -106,8 +109,17 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
               {q.trim().length >= 2 && results.length === 0 && <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.5)' }}>No customers match.</div>}
               {results.map((r) => (
                 <button key={r.id} onClick={() => setId(r.id)} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '11px 4px', border: 'none', borderBottom: '1px solid rgba(0,0,0,.07)', background: 'none', textAlign: 'left', cursor: 'pointer' }}>
-                  <span style={{ fontSize: 14.5, fontWeight: 700, color: '#111' }}>{r.name}</span>
-                  <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{r.email}{r.phone ? ` · ${r.phone}` : ''}{r.memberHours != null ? ` · Member, ${r.memberHours} hr left` : ''}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 14.5, fontWeight: 700, color: '#111' }}>{r.name}</span>
+                    {r.type === 'walkin' && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)' }}>Walk-in</span>}
+                    {r.memberHours != null && <span style={{ fontSize: 12, fontWeight: 700, color: RED }}>Member</span>}
+                  </span>
+                  {r.teams?.length > 0 && <span style={{ fontSize: 12.5, fontWeight: 600, color: '#111' }}>{r.teams.join(' · ')}</span>}
+                  <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>
+                    {r.type === 'walkin'
+                      ? [r.phone, `${r.bookings} booking${r.bookings === 1 ? '' : 's'}`].filter(Boolean).join(' · ')
+                      : `${r.email}${r.phone ? ` · ${r.phone}` : ''}${r.memberHours != null ? ` · ${r.memberHours} hr left` : ''}`}
+                  </span>
                 </button>
               ))}
             </div>
@@ -135,12 +147,12 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
               </div>
             )}
 
-            <button onClick={() => onBook({ id: c.id, name: c.name, email: c.email, phone: c.phone, memberHours: c.memberHours, memberExpires: c.memberExpires })}
+            <button onClick={() => onBook(walk ? { type: 'walkin', name: c.name, phone: c.phone } : { id: c.id, name: c.name, email: c.email, phone: c.phone, memberHours: c.memberHours, memberExpires: c.memberExpires })}
               style={{ minHeight: 44, borderRadius: 6, border: 'none', background: RED, color: '#fff', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' }}>
-              Book for {c.firstName || c.name}
+              Book for {walk ? c.name.split(' ')[0] : c.firstName || c.name}
             </button>
 
-            <section>
+            {!walk && <section>
               <div style={label}>Staff notes</div>
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Only staff see these. e.g. Prefers Cage 2, brings own machine."
                 style={{ ...field, width: '100%', boxSizing: 'border-box', padding: '10px', minHeight: 80, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
@@ -150,7 +162,7 @@ export default function StaffCustomer({ initialId = null, tz, onClose, onBook, o
                 </span>
                 {notes !== c.notes && <button disabled={savingNotes} onClick={saveNotes} style={{ minHeight: 34, padding: '0 14px', borderRadius: 6, border: 'none', background: '#000', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{savingNotes ? 'Saving…' : 'Save notes'}</button>}
               </div>
-            </section>
+            </section>}
 
             <section>
               <div style={label}>Upcoming</div>
