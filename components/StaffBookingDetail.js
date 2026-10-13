@@ -20,7 +20,7 @@ function localParts(d, tz) {
 const hmLabel = (hm) => { const [h, m] = hm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
-export default function StaffBookingDetail({ group: g, tz, settings, cages = [], onClose, onChanged, onMoved, onConvert }) {
+export default function StaffBookingDetail({ group: g, tz, settings, cages = [], onClose, onChanged, onMoved, onConvert, onCustomer }) {
   const [mode, setMode] = useState(null); // null | 'cancel' | 'move' | 'collect'
   const [collectSecret, setCollectSecret] = useState(null);
   const isHold = g.kind === 'staff_hold';
@@ -48,6 +48,18 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
   const [notice, setNotice] = useState(null);
   const st = STATES[g.payState] || STATES.unpaid;
   const live = LIVE.includes(g.status);
+  const footer = live || (g.status === 'completed' && canCollect);
+  const arrival = ['drop_in', 'membership', 'team', 'party'].includes(g.kind) && ['confirmed', 'completed', 'no_show'].includes(g.status);
+  const started = new Date(g.startsAt) <= new Date();
+  const canCheckIn = new Date(g.startsAt) - Date.now() <= 2 * 3600000;
+
+  async function door(action, text) {
+    setWorking(true);
+    setNotice(null);
+    try { await staffAction(action, { p_group_id: g.groupId }); setNotice({ text }); onChanged?.(); }
+    catch (e) { setNotice({ error: true, text: e.message }); }
+    setWorking(false);
+  }
 
   const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { timeZone: tz, weekday: 'long', month: 'long', day: 'numeric' });
   const fmtTime = (d) => new Date(d).toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' });
@@ -163,6 +175,9 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
             <div style={label}>Customer</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 14, lineHeight: 1.5 }}>
               <div style={{ fontWeight: 600 }}>{g.name}</div>
+              {g.userId && onCustomer && (
+                <button onClick={() => onCustomer(g.userId)} style={{ alignSelf: 'flex-start', border: 'none', background: 'none', padding: '2px 0', cursor: 'pointer', fontSize: 13, color: RED, fontWeight: 700 }}>View profile ›</button>
+              )}
               {g.contactName && g.contactName !== g.name && <div>Contact: {g.contactName}</div>}
               {g.email && <a href={`mailto:${g.email}`} style={{ color: '#111' }}>{g.email}</a>}
               {g.phone ? <a href={`tel:${g.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{g.phone}</a> : <div style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</div>}
@@ -216,6 +231,33 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
 
           </>)}
 
+          {arrival && (
+            <section>
+              <div style={label}>Arrival</div>
+              {g.status === 'no_show' ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 14 }}>
+                  <span style={{ color: RED, fontWeight: 700 }}>No-show{g.noShowAt ? ` · marked ${fmtStamp(g.noShowAt)}` : ''}</span>
+                  <button disabled={working} onClick={() => door('undo_no_show', 'No-show undone. The booking is back on the schedule.')} style={linkBtn}>Undo</button>
+                </div>
+              ) : g.checkedInAt ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 14 }}>
+                  <span style={{ color: '#14532A', fontWeight: 700 }}>✓ Checked in {fmtStamp(g.checkedInAt)}</span>
+                  <button disabled={working} onClick={() => door('undo_check_in', 'Check-in undone.')} style={linkBtn}>Undo</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.6)' }}>
+                    {owed > 0 ? `Collect the ${money(owed)} due before checking in.` : !canCheckIn ? 'Check-in opens 2 hours before the start time.' : started ? 'Not here yet.' : 'Expected.'}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {owed === 0 && canCheckIn && <button disabled={working} onClick={() => door('check_in', 'Checked in.')} style={{ ...secondaryBtn, fontWeight: 700, color: '#fff', background: RED, border: 'none' }}>Check in</button>}
+                    {started && <button disabled={working} onClick={() => door('no_show', `Marked as a no-show. The cage is open again${g.chargeCents ? '; what they paid is kept' : ''}.`)} style={{ ...secondaryBtn, fontWeight: 700, color: RED, border: `1px solid ${RED}` }}>No-show</button>}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
           {g.notes && (
             <section>
               <div style={label}>Notes</div>
@@ -234,7 +276,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
           )}
         </div>
 
-        {live && (
+        {footer && (
           <div style={{ padding: '16px 24px 22px', borderTop: '1px solid rgba(0,0,0,.08)', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {mode === 'cancel' && (
               <>
@@ -325,7 +367,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
             {!mode && canCollect && (
               <button onClick={() => { setMode('collect'); setNotice(null); }} style={{ ...primaryBtn, background: '#000', cursor: 'pointer' }}>Collect {money(owed)}</button>
             )}
-            {!mode && (
+            {!mode && live && (
               <div style={{ display: 'flex', gap: 8 }}>
                 {isHold && onConvert && <button onClick={() => onConvert(g)} style={{ ...secondaryBtn, fontWeight: 700, color: '#fff', background: RED, border: 'none' }}>Book it</button>}
                 <button onClick={() => { setMode('move'); setNotice(null); }} style={{ ...secondaryBtn, fontWeight: 700, color: '#111' }}>Move</button>
@@ -345,6 +387,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
 }
 
 const secondaryBtn = { flex: 1, minHeight: 44, borderRadius: 6, border: '1px solid rgba(0,0,0,.15)', background: '#fff', fontSize: 13.5, cursor: 'pointer' };
+const linkBtn = { border: 'none', background: 'none', padding: '6px 2px', cursor: 'pointer', fontSize: 13, color: 'rgba(0,0,0,.6)', textDecoration: 'underline' };
 const primaryBtn = { minHeight: 44, borderRadius: 6, border: 'none', background: RED, color: '#fff', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase' };
 const fieldLabel = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, fontWeight: 600, color: 'rgba(0,0,0,.6)' };
 const field = { minHeight: 42, padding: '0 10px', border: '1px solid rgba(0,0,0,.2)', borderRadius: 6, fontSize: 14, background: '#fff', color: '#111', fontWeight: 400 };

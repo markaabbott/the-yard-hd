@@ -54,7 +54,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
 
   // Booking
   const [who, setWho] = useState('account'); // account | new | guest
-  const [cust, setCust] = useState(null);
+  const [cust, setCust] = useState(initial.customer || null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
