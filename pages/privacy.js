@@ -66,6 +66,12 @@ export default function Privacy() {
         for cross-context behavioral advertising.
       </P>
 
+      <H>Do Not Track</H>
+      <P>
+        Our site does not track you across other websites, and we do not allow third parties to do so. Because we don&rsquo;t
+        do that kind of tracking, we don&rsquo;t change anything when your browser sends a &ldquo;Do Not Track&rdquo; signal.
+      </P>
+
       <H>Security</H>
       <P>
         Your information is stored with providers that encrypt it in transit and at rest, and access is limited to the staff
