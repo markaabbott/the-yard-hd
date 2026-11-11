@@ -73,6 +73,10 @@ export default function SignIn() {
             {err && <div style={{ fontSize: 12.5, color: '#BA0C2F' }}>{err}</div>}
           </form>
         )}
+
+        <p style={{ textAlign: 'center', fontSize: 12, lineHeight: 1.5, color: 'rgba(0,0,0,.5)', margin: 0 }}>
+          By continuing you agree to our <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.
+        </p>
       </div>
     </main>
   );
