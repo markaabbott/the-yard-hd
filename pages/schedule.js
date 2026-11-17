@@ -79,6 +79,7 @@ export default function Schedule() {
   const [settings, setSettings] = useState(null);
   const [cages, setCages] = useState([]);
   const [busy, setBusy] = useState([]);
+  const [mine, setMine] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const [loadingGrid, setLoadingGrid] = useState(true);
   const [error, setError] = useState(null);
@@ -121,13 +122,17 @@ export default function Schedule() {
     setLoadingGrid(true);
     setError(null);
 
-    const [settingsRes, cagesRes, scheduleRes, blocksRes] = await Promise.all([
+    const [settingsRes, cagesRes, scheduleRes, blocksRes, mineRes] = await Promise.all([
       supabase.from('facility_settings').select('*').eq('id', 1).single(),
       supabase.from('cages').select('*').eq('active', true).order('sort_order'),
       supabase.from('v_public_schedule').select('cage_id, starts_at, ends_at')
         .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString()),
       supabase.from('blocks').select('cage_id, scope, starts_at, ends_at')
-        .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString())
+        .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString()),
+      // The customer's own bookings, so the grid can say "Yours" instead of "Booked".
+      user ? supabase.from('reservations').select('cage_id, starts_at, ends_at, kind, party_name, team_name')
+        .eq('user_id', user.id).in('status', ['pending_payment', 'scheduled', 'confirmed'])
+        .lt('starts_at', dayEnd.toISOString()).gt('ends_at', dayStart.toISOString()) : { data: [] }
     ]);
 
     const failure = [settingsRes, cagesRes, scheduleRes, blocksRes].find((r) => r.error);
@@ -150,8 +155,9 @@ export default function Schedule() {
     setCages(cagesRes.data || []);
     setBusy(scheduleRes.data || []);
     setBlocks(blocksRes.data || []);
+    setMine(mineRes.data || []);
     setLoadingGrid(false);
-  }, [dayStart, dayEnd]);
+  }, [dayStart, dayEnd, user]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -175,6 +181,16 @@ export default function Schedule() {
       t = new Date(t.getTime() + settings.slot_minutes * 60000);
     }
   }
+
+  // Which of the customer's own bookings covers this cage + slot, if any.
+  function myAt(cageId, slotStart) {
+    const slotEnd = new Date(slotStart.getTime() + (settings?.slot_minutes || 30) * 60000);
+    return mine.find((r) => (cageId == null || r.cage_id === cageId) &&
+      new Date(r.starts_at) < slotEnd && new Date(r.ends_at) > slotStart);
+  }
+  const myLabel = (r) => (r.kind === 'party' ? `Your party${r.party_name ? `: ${r.party_name}` : ''}`
+    : r.kind === 'team' ? `Your team${r.team_name ? `: ${r.team_name}` : ''}` : 'Yours');
+  const mineStyle = { background: 'rgba(186,12,47,.08)', color: '#BA0C2F', fontWeight: 700, cursor: 'default' };
 
   const wholeFacility = mode === 'party' || mode === 'team';
   // A start time only counts as open when the shortest party package (or a
@@ -286,6 +302,8 @@ export default function Schedule() {
                   {s.toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' })}
                 </div>
                 {wholeFacility ? (() => {
+                  const own = myAt(null, s);
+                  if (own) return <button disabled style={{ ...cellSlot, ...mineStyle }}>{myLabel(own)}</button>;
                   const taken = isFacilityTaken(s);
                   const disabled = taken || s < now;
                   return (
@@ -295,6 +313,8 @@ export default function Schedule() {
                     </button>
                   );
                 })() : cages.map((c) => {
+                  const own = myAt(c.id, s);
+                  if (own) return <button key={c.id} disabled style={{ ...cellSlot, ...mineStyle }}>{own.kind === 'party' ? 'Your party' : myLabel(own)}</button>;
                   const taken = isTaken(c.id, s);
                   const past = s < now;
                   const disabled = taken || past;
