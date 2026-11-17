@@ -15,7 +15,7 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
   const load = useCallback(async () => {
     const [{ data: res }, { data: pays }] = await Promise.all([
       supabase.from('reservations').select('group_id, starts_at, ends_at, cages(name, sort_order)')
-        .eq('user_id', userId).eq('status', 'confirmed').gt('starts_at', new Date().toISOString())
+        .eq('user_id', userId).eq('status', 'confirmed').neq('kind', 'team').gt('starts_at', new Date().toISOString())
         .order('starts_at'),
       supabase.from('payments').select('reservation_group_id, amount_cents, method, processing_fee_cents')
         .eq('user_id', userId).eq('entry_type', 'charge').eq('status', 'succeeded'),
