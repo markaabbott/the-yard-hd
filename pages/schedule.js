@@ -275,7 +275,7 @@ export default function Schedule() {
         <div style={{ color: 'rgba(0,0,0,.4)', fontSize: 14 }}>Loading schedule…</div>
       ) : (
         <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: wholeFacility ? '90px minmax(200px, 1fr)' : `90px repeat(${cages.length}, 140px)`, minWidth: wholeFacility ? 290 : 90 + cages.length * 140 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: wholeFacility ? '90px minmax(200px, 1fr)' : `90px repeat(${cages.length}, minmax(140px, 1fr))`, minWidth: wholeFacility ? 290 : 90 + cages.length * 140 }}>
             <div style={cellHead} />
             {wholeFacility
               ? <div style={cellHead}>Whole facility</div>
