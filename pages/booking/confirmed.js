@@ -16,7 +16,7 @@ export default function Confirmed() {
 
     async function resolveGroupFromIntent() {
       // Redirected back from Stripe: look up which group this payment belongs to.
-      const { data } = await supabase.from('payments').select('reservation_group_id, status')
+      const { data } = await supabase.from('payments').select('reservation_group_id, status, purpose')
         .eq('stripe_payment_intent_id', payment_intent).single();
       return data;
     }
@@ -26,6 +26,13 @@ export default function Confirmed() {
       if (!gid && payment_intent) {
         const p = await resolveGroupFromIntent();
         if (p) gid = p.reservation_group_id;
+        // Memberships and team cycles have no single booking to show.
+        if (p && !gid) {
+          if (cancelled) return;
+          if (p.status === 'succeeded') { setStatus(p.purpose === 'team' ? 'team' : 'member'); return; }
+          if (redirect_status === 'succeeded') { setTimeout(poll, 1500); return; }
+          setStatus('failed'); return;
+        }
       }
       if (!gid) { setStatus('not_found'); return; }
 
@@ -55,6 +62,17 @@ export default function Confirmed() {
           </div>
           <div style={{ fontSize: 14, color: 'rgba(0,0,0,.6)', marginBottom: 24 }}>
             {new Date(reservations[0].starts_at).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+          </div>
+          <Link href="/schedule" style={{ color: '#BA0C2F', fontWeight: 700, fontSize: 14 }}>Back to schedule</Link>
+        </>
+      )}
+      {(status === 'member' || status === 'team') && (
+        <>
+          <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 24, textTransform: 'uppercase', marginBottom: 10 }}>
+            Payment received
+          </div>
+          <div style={{ fontSize: 14, color: 'rgba(0,0,0,.6)', marginBottom: 24 }}>
+            {status === 'member' ? 'Your membership is active. A receipt is on its way.' : 'Your team practices are confirmed. A receipt is on its way.'}
           </div>
           <Link href="/schedule" style={{ color: '#BA0C2F', fontWeight: 700, fontSize: 14 }}>Back to schedule</Link>
         </>
