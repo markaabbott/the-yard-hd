@@ -7,6 +7,7 @@
 //   with that email (magic link / Google / Apple) and the booking is already theirs.
 import { supabaseAdmin as admin } from '../../../lib/supabaseAdmin';
 import { requireStaff } from '../../../lib/staffAuth';
+import { formatPhone, PHONE_ERROR } from '../../../lib/phone';
 
 const COLS = 'id, first_name, last_name, email, phone, needs_name';
 const RCOLS = 'group_id, cage_id, starts_at, ends_at, kind, status, user_id, guest_name, guest_phone, party_name, team_name, guest_count, no_show_at, hold_expires_at';
@@ -16,15 +17,27 @@ const digitsOf = (s) => String(s || '').replace(/\D/g, '');
 const likeEsc = (s) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 const fullName = (u) => (u.needs_name ? u.email : `${u.first_name} ${u.last_name}`.trim());
 
+// Highest staff role wins; no staff role = customer.
+const RANK = { owner: 3, admin: 2, coach: 1 };
+
 async function withHours(list) {
   if (!list.length) return [];
-  const { data: bal } = await admin.from('v_membership_balance')
-    .select('user_id, hours_remaining, expires_at')
-    .in('user_id', list.map((u) => u.id)).gt('expires_at', new Date().toISOString());
+  const ids = list.map((u) => u.id);
+  const [{ data: bal }, { data: roleRows }] = await Promise.all([
+    admin.from('v_membership_balance')
+      .select('user_id, hours_remaining, expires_at')
+      .in('user_id', ids).gt('expires_at', new Date().toISOString()),
+    admin.from('user_roles').select('user_id, role').in('user_id', ids),
+  ]);
   const hours = new Map((bal || []).map((b) => [b.user_id, b]));
+  const roles = new Map();
+  for (const r of roleRows || []) {
+    if ((RANK[r.role] || 0) > (RANK[roles.get(r.user_id)] || 0)) roles.set(r.user_id, r.role);
+  }
   return list.map((u) => ({
     type: 'account',
     id: u.id,
+    role: roles.get(u.id) || 'customer',
     name: fullName(u),
     email: u.email,
     phone: u.phone,
@@ -223,8 +236,10 @@ export default async function handler(req, res) {
       const first = String(firstName || '').trim().slice(0, 60);
       const last = String(lastName || '').trim().slice(0, 60);
       if (!first || !last) return res.status(400).json({ error: 'First and last name are required.' });
+      const ph = formatPhone(phone);
+      if (ph === null) return res.status(400).json({ error: PHONE_ERROR });
       const { error } = await admin.from('users')
-        .update({ first_name: first, last_name: last, phone: String(phone || '').trim() || null, needs_name: false })
+        .update({ first_name: first, last_name: last, phone: ph || null, needs_name: false })
         .eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
     }
@@ -239,6 +254,8 @@ export default async function handler(req, res) {
     const mail = String(email || '').trim().toLowerCase();
     if (!first || !last) return res.status(400).json({ error: 'First and last name are required.' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) return res.status(400).json({ error: 'Enter a valid email, or book them as a walk-in instead.' });
+    const ph = formatPhone(phone);
+    if (ph === null) return res.status(400).json({ error: PHONE_ERROR });
 
     const { data: existing } = await admin.from('users').select(COLS).eq('email', mail).maybeSingle();
     if (existing) {
@@ -252,7 +269,7 @@ export default async function handler(req, res) {
     if (error) return res.status(400).json({ error: error.message });
 
     const { data: row, error: upErr } = await admin.from('users')
-      .update({ first_name: first, last_name: last, phone: String(phone || '').trim() || null, needs_name: false })
+      .update({ first_name: first, last_name: last, phone: ph || null, needs_name: false })
       .eq('id', created.user.id).select(COLS).single();
     if (upErr) return res.status(500).json({ error: upErr.message });
     const [c] = await withHours([row]);
