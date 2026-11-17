@@ -5,6 +5,17 @@ import { supabase } from '../lib/supabaseClient';
 import BookingPanel from '../components/BookingPanel';
 import NamePrompt from '../components/NamePrompt';
 import MyBookings from '../components/MyBookings';
+import TeamPanel from '../components/TeamPanel';
+import MembershipSection from '../components/MembershipSection';
+import MyTeams from '../components/MyTeams';
+import { localParts } from '../lib/facilityTime';
+
+const MODES = [
+  { k: 'drop', t: 'Drop-in', sub: 'One cage, 30 min – 2 hr' },
+  { k: 'party', t: 'Party', sub: 'Whole facility, 2 or 3 hr' },
+  { k: 'team', t: 'Team practice', sub: 'Weekly, whole facility' },
+  { k: 'member', t: 'Membership', sub: 'Monthly cage hours' },
+];
 
 const FALLBACK_TZ = 'America/Los_Angeles';
 
@@ -76,6 +87,9 @@ export default function Schedule() {
   const [needsName, setNeedsName] = useState(false);
   const [bookingsKey, setBookingsKey] = useState(0);
   const [isStaff, setIsStaff] = useState(false);
+  const [mode, setMode] = useState('drop');
+  const [member, setMember] = useState(false);
+  const [teamsKey, setTeamsKey] = useState(0);
 
   const tz = settings?.timezone || FALLBACK_TZ;
 
@@ -90,6 +104,15 @@ export default function Schedule() {
     supabase.from('user_roles').select('role').eq('user_id', user.id).in('role', ['coach', 'admin', 'owner'])
       .then(({ data }) => setIsStaff(!!data?.length));
   }, [user]);
+
+  // Members spend their hours on drop-in bookings automatically.
+  const loadMember = useCallback(() => {
+    if (!user) return;
+    supabase.from('v_membership_balance').select('hours_remaining, expires_at')
+      .eq('user_id', user.id).gt('expires_at', new Date().toISOString()).maybeSingle()
+      .then(({ data }) => setMember(!!data));
+  }, [user]);
+  useEffect(() => { loadMember(); }, [loadMember]);
 
   const dayStart = useMemo(() => zonedTimeToUtc(dayYmd, 0, 0, tz), [dayYmd, tz]);
   const dayEnd = useMemo(() => zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz), [dayYmd, tz]);
@@ -153,6 +176,11 @@ export default function Schedule() {
     }
   }
 
+  const wholeFacility = mode === 'party' || mode === 'team';
+  function isFacilityTaken(slotStart) {
+    return cages.some((c) => isTaken(c.id, slotStart));
+  }
+
   function isTaken(cageId, slotStart) {
     const slotEnd = new Date(slotStart.getTime() + (settings?.slot_minutes || 30) * 60000);
     const hit = (r) => (r.cage_id === cageId || r.scope === 'facility') &&
@@ -181,6 +209,33 @@ export default function Schedule() {
       </div>
 
       {settings && <MyBookings key={bookingsKey} userId={user.id} settings={settings} tz={tz} onChange={load} />}
+      <MyTeams userId={user.id} tz={tz} refreshKey={teamsKey} />
+
+      <div role="tablist" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
+        {MODES.map((m) => {
+          const on = mode === m.k;
+          return (
+            <button key={m.k} role="tab" aria-selected={on} onClick={() => setMode(m.k)}
+              style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 9, cursor: 'pointer', background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', border: `1px solid ${on ? '#111' : 'rgba(0,0,0,.15)'}` }}>
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 16, textTransform: 'uppercase', letterSpacing: '.03em' }}>{m.t}</div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>{m.k === 'drop' && member ? 'Uses your member hours' : m.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {mode === 'member' && settings && (
+        <MembershipSection userId={user.id} settings={settings} tz={tz} onChange={loadMember} />
+      )}
+
+      {mode !== 'member' && (<>
+      {wholeFacility && (
+        <div style={{ fontSize: 13.5, lineHeight: 1.6, padding: '10px 14px', borderRadius: 8, background: '#FBEDEF', marginBottom: 14 }}>
+          {mode === 'party'
+            ? <>Parties get <strong>every cage plus the mezzanine</strong>. Pick a start time where the whole facility is open. 2 hours {money(settings?.party_packages?.['120'])}, 3 hours {money(settings?.party_packages?.['180'])}, up to {settings?.party_max_guests ?? 30} guests, {settings?.party_deposit_percent ?? 25}% deposit today.</>
+            : <>Team practice reserves the <strong>whole facility</strong> at the same time every week. Pick your first practice; you'll pay for four weeks at a time.</>}
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
         <button onClick={() => setDayYmd(addDaysYmd(dayYmd, -1))} style={navBtn}>‹</button>
@@ -208,15 +263,26 @@ export default function Schedule() {
         <div style={{ color: 'rgba(0,0,0,.4)', fontSize: 14 }}>Loading schedule…</div>
       ) : (
         <div style={{ overflowX: 'auto', border: '1px solid rgba(0,0,0,.1)', borderRadius: 10, background: '#fff' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: `90px repeat(${cages.length}, 140px)`, minWidth: 90 + cages.length * 140 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: wholeFacility ? '90px minmax(200px, 1fr)' : `90px repeat(${cages.length}, 140px)`, minWidth: wholeFacility ? 290 : 90 + cages.length * 140 }}>
             <div style={cellHead} />
-            {cages.map((c) => <div key={c.id} style={cellHead}>{c.name}</div>)}
+            {wholeFacility
+              ? <div style={cellHead}>Whole facility</div>
+              : cages.map((c) => <div key={c.id} style={cellHead}>{c.name}</div>)}
             {slots.map((s) => (
               <React.Fragment key={s.toISOString()}>
                 <div style={{ ...cellTime }}>
                   {s.toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' })}
                 </div>
-                {cages.map((c) => {
+                {wholeFacility ? (() => {
+                  const taken = isFacilityTaken(s);
+                  const disabled = taken || s < now;
+                  return (
+                    <button disabled={disabled} onClick={() => setSelected({ kind: mode, cages, startsAt: s })}
+                      style={{ ...cellSlot, background: disabled ? 'rgba(0,0,0,.05)' : '#fff', color: disabled ? 'rgba(0,0,0,.25)' : '#111', cursor: disabled ? 'not-allowed' : 'pointer' }}>
+                      {taken ? 'Booked' : s < now ? '—' : 'Open'}
+                    </button>
+                  );
+                })() : cages.map((c) => {
                   const taken = isTaken(c.id, s);
                   const past = s < now;
                   const disabled = taken || past;
@@ -224,7 +290,7 @@ export default function Schedule() {
                     <button
                       key={c.id}
                       disabled={disabled}
-                      onClick={() => setSelected({ cage: c, startsAt: s })}
+                      onClick={() => setSelected({ kind: member ? 'membership' : 'drop_in', cages: [c], startsAt: s })}
                       style={{
                         ...cellSlot,
                         background: disabled ? 'rgba(0,0,0,.05)' : '#fff',
@@ -242,22 +308,37 @@ export default function Schedule() {
         </div>
       )}
 
+      </>)}
+
       {needsName && <NamePrompt onDone={() => setNeedsName(false)} />}
 
-      {selected && (
+      {selected && selected.kind === 'team' && (() => {
+        const lp = localParts(selected.startsAt, tz);
+        return (
+          <TeamPanel
+            startsAt={selected.startsAt} ymd={lp.ymd} hm={lp.hm} tz={tz} settings={settings}
+            onClose={() => { setSelected(null); load(); }}
+            onBooked={() => { setSelected(null); load(); setTeamsKey((k) => k + 1); }}
+          />
+        );
+      })()}
+
+      {selected && selected.kind !== 'team' && (
         <BookingPanel
-          cage={selected.cage}
+          kind={selected.kind}
+          cages={selected.cages}
           startsAt={selected.startsAt}
-          slotMinutes={settings.slot_minutes}
+          settings={settings}
           userId={user.id}
-          onClose={() => { setSelected(null); load(); }}
-          onBooked={() => { setSelected(null); load(); setBookingsKey((k) => k + 1); }}
+          onClose={() => { setSelected(null); load(); loadMember(); }}
+          onBooked={() => { setSelected(null); load(); loadMember(); setBookingsKey((k) => k + 1); }}
         />
       )}
     </main>
   );
 }
 
+const money = (c) => (c == null ? '' : `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`);
 const navBtn = { width: 34, height: 34, borderRadius: 7, border: '1px solid rgba(0,0,0,.15)', background: '#fff', cursor: 'pointer', fontSize: 16 };
 const cellHead = { padding: '10px 12px', fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', borderBottom: '1px solid rgba(0,0,0,.1)', background: '#faf9f7' };
 const cellTime = { padding: '8px 10px', fontSize: 12, color: 'rgba(0,0,0,.55)', borderTop: '1px solid rgba(0,0,0,.06)', display: 'flex', alignItems: 'center' };
