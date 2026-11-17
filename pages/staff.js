@@ -45,14 +45,27 @@ export default function Staff() {
 
   useEffect(() => { if (!loading && !user) router.replace('/signin'); }, [loading, user, router]);
 
+  // Another tab signed in as someone else (or signed out): start over as the
+  // new account so the page never mixes one person's header with another's data.
+  const userIdRef = React.useRef(undefined);
+  useEffect(() => {
+    if (loading) return;
+    const id = user?.id || null;
+    if (userIdRef.current !== undefined && userIdRef.current !== id) {
+      if (id) window.location.reload(); else router.replace('/signin');
+    }
+    userIdRef.current = id;
+  }, [loading, user?.id, router]);
+
   const load = useCallback(async () => {
     const start = zonedTimeToUtc(dayYmd, 0, 0, tz);
     const end = zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz);
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) { router.replace('/signin'); return; }
     const r = await fetch(`/api/staff/day?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
+    if (r.status === 401) { router.replace('/signin'); return; }
     if (r.status === 403) { router.replace('/schedule'); return; }
     const body = await r.json().catch(() => ({}));
     if (!r.ok) { setError(body.error || 'Could not load the schedule.'); return; }
