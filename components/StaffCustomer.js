@@ -1,9 +1,22 @@
 import { useEffect, useState } from 'react';
 import { searchCustomers, getCustomer, updateCustomer } from '../lib/staffApi';
+import PhoneField from './PhoneField';
+import { formatPhone, isPhoneOk } from '../lib/phone';
 
 const RED = '#BA0C2F';
 const money = (c) => `$${(Math.abs(c) / 100).toFixed(2)}`;
 const label = { fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 12, letterSpacing: '.12em', textTransform: 'uppercase', color: 'rgba(0,0,0,.5)', marginBottom: 8 };
+// Who this account is: Customer, or their staff role.
+const ROLE = {
+  owner: { label: 'Owner', bg: '#000', fg: '#fff' },
+  admin: { label: 'Admin', bg: RED, fg: '#fff' },
+  coach: { label: 'Coach', bg: '#FBEDEF', fg: RED },
+  customer: { label: 'Customer', bg: '#F2F0ED', fg: 'rgba(0,0,0,.6)' },
+};
+const RoleBadge = ({ role, big }) => {
+  const r = ROLE[role] || ROLE.customer;
+  return <span style={{ alignSelf: 'flex-start', padding: big ? '2px 8px' : '1px 7px', borderRadius: 999, fontSize: big ? 10.5 : 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: r.bg, color: r.fg }}>{r.label}</span>;
+};
 const STATUS = { confirmed: 'Booked', scheduled: 'Scheduled', completed: 'Done', canceled: 'Canceled', no_show: 'No-show', pending_payment: 'Checking out' };
 
 // Right-side drawer: find a customer, then their profile, history, and staff notes.
@@ -42,7 +55,8 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
   }
   async function saveEdit() {
     setErr(null);
-    try { const b = await updateCustomer(id, edit); setC(b.customer); setEdit(null); } catch (e) { setErr(e.message); }
+    if (!isPhoneOk(edit.phone)) return;
+    try { const b = await updateCustomer(id, { ...edit, phone: formatPhone(edit.phone) || '' }); setC(b.customer); setEdit(null); } catch (e) { setErr(e.message); }
   }
 
   const booking = (g) => (
@@ -77,6 +91,7 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
               <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 24, lineHeight: 1.15, textTransform: 'uppercase', letterSpacing: '.02em' }}>{c.name}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, lineHeight: 1.5 }}>
                 {walk && <span style={{ alignSelf: 'flex-start', padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)', marginBottom: 2 }}>Walk-in · no account</span>}
+                {!walk && <span style={{ display: 'flex', marginBottom: 2 }}><RoleBadge role={c.role} big /></span>}
                 {c.email && <a href={`mailto:${c.email}`} style={{ color: '#111' }}>{c.email}</a>}
                 {(walk ? c.phones : [c.phone].filter(Boolean)).map((ph) => <a key={ph} href={`tel:${ph.replace(/\D/g, '')}`} style={{ color: '#111' }}>{ph}</a>)}
                 {!(walk ? c.phones.length : c.phone) && <span style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</span>}
@@ -92,10 +107,10 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                 <label style={fieldLabel}>First name<input value={edit.firstName} onChange={(e) => setEdit({ ...edit, firstName: e.target.value })} style={field} /></label>
                 <label style={fieldLabel}>Last name<input value={edit.lastName} onChange={(e) => setEdit({ ...edit, lastName: e.target.value })} style={field} /></label>
               </div>
-              <label style={fieldLabel}>Phone<input value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} style={field} /></label>
+              <label style={fieldLabel}>Phone<PhoneField value={edit.phone} onChange={(v) => setEdit({ ...edit, phone: v })} placeholder="(760) 555-0100" style={field} /></label>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setEdit(null)} style={secondaryBtn}>Cancel</button>
-                <button onClick={saveEdit} style={{ ...secondaryBtn, background: '#000', color: '#fff', border: 'none', fontWeight: 700 }}>Save</button>
+                <button onClick={saveEdit} disabled={!isPhoneOk(edit.phone)} style={{ ...secondaryBtn, background: '#000', color: '#fff', border: 'none', fontWeight: 700, opacity: isPhoneOk(edit.phone) ? 1 : 0.5 }}>Save</button>
               </div>
             </div>
           )}
@@ -111,7 +126,9 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                 <button key={r.id} onClick={() => setId(r.id)} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '11px 4px', border: 'none', borderBottom: '1px solid rgba(0,0,0,.07)', background: 'none', textAlign: 'left', cursor: 'pointer' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 14.5, fontWeight: 700, color: '#111' }}>{r.name}</span>
-                    {r.type === 'walkin' && <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)' }}>Walk-in</span>}
+                    {r.type === 'walkin'
+                      ? <span style={{ padding: '1px 7px', borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)' }}>Walk-in</span>
+                      : <RoleBadge role={r.role} />}
                     {r.memberHours != null && <span style={{ fontSize: 12, fontWeight: 700, color: RED }}>Member</span>}
                   </span>
                   {r.teams?.length > 0 && <span style={{ fontSize: 12.5, fontWeight: 600, color: '#111' }}>{r.teams.join(' · ')}</span>}

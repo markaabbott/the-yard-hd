@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabaseClient';
 import { zonedTimeToUtc, localParts, hmLabel, todayYmd, addDaysYmd } from '../lib/facilityTime';
 import { staffAction, searchCustomers, createCustomer, cardIntent, releaseHold } from '../lib/staffApi';
 import PaymentForm from './PaymentForm';
+import PhoneField from './PhoneField';
+import { formatPhone, isPhoneOk } from '../lib/phone';
 
 // Right-side drawer for anything staff put on the grid themselves:
 // a booking for a customer, a staff hold, or a block.
@@ -13,6 +15,7 @@ const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + 
 const hmOf = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const durLabel = (m) => (m < 60 ? `${m} min` : `${m / 60} hr`);
 const at = (ymd, hm, tz) => { const [h, m] = hm.split(':').map(Number); return zonedTimeToUtc(ymd, h, m, tz); };
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 const TABS = [
   { k: 'booking', t: 'Booking' },
@@ -39,6 +42,8 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const openM = toMin(settings?.open_time || '09:00');
   const closeM = toMin(settings?.close_time || '21:00');
   const depositPct = settings?.party_deposit_percent ?? 25;
+  const partyMins = Object.keys(settings?.party_packages || { 120: 1, 180: 1 }).map(Number).sort((a, b) => a - b);
+  const maxGuests = settings?.party_max_guests ?? 30;
 
   const seedStart = fromHold?.startsAt || initial.startsAt;
   const start0 = seedStart ? localParts(seedStart, tz) : { ymd: todayYmd(tz), hm: hmOf(openM) };
@@ -97,6 +102,19 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const memberOk = who !== 'guest' && cust?.memberHours != null;
 
   useEffect(() => { if (kind === 'membership' && !memberOk) setKind('drop_in'); }, [memberOk, kind]);
+
+  // A party is the whole facility, booked as a flat package (2 or 3 hours).
+  const prevKind = useRef(kind);
+  useEffect(() => {
+    if (kind === 'party') {
+      setCageIds(cages.map((c) => c.id));
+      if (!partyMins.includes(dur)) setDur(partyMins[0]);
+    } else if (prevKind.current === 'party') {
+      setCageIds(initial.cageId ? [initial.cageId] : []);
+    }
+    prevKind.current = kind;
+  }, [kind]);
+  const isParty = tab === 'booking' && kind === 'party';
   useEffect(() => { setErr(null); setConflicts(null); }, [tab]);
 
   useEffect(() => {
@@ -138,7 +156,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   }
   if (!timeOpts.some((o) => o.hm === time)) timeOpts.unshift({ hm: time, label: hmLabel(time) });
   const allTimes = Array.from({ length: (24 * 60) / step }, (_, i) => hmOf(i * step));
-  const durOpts = Array.from({ length: Math.floor((8 * 60) / step) }, (_, i) => (i + 1) * step);
+  const durOpts = isParty ? [...partyMins] : Array.from({ length: Math.floor((8 * 60) / step) }, (_, i) => (i + 1) * step);
   if (!durOpts.includes(dur)) durOpts.push(dur);
 
   const cageName = (id) => cages.find((c) => c.id === id)?.name || 'Cage';
@@ -148,15 +166,29 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
 
   const custEmail = who === 'guest' ? null : who === 'new' ? nc.email.trim() : cust?.email;
   const whoReady = who === 'account' ? !!cust : who === 'new' ? nc.firstName.trim() && nc.lastName.trim() && nc.email.trim() : guest.name.trim();
-  const canBook = cageIds.length && whoReady && (pay !== 'comp' || compMemo.trim()) && !quoteErr;
+  const phoneOk = who === 'new' ? isPhoneOk(nc.phone) : who === 'guest' ? isPhoneOk(guest.phone) : true;
+  const guestsOk = !isParty || !party.count || Number(party.count) <= maxGuests;
+  const canBook = cageIds.length && whoReady && phoneOk && guestsOk && (pay !== 'comp' || compMemo.trim()) && !quoteErr;
   const canHold = cageIds.length && label.trim();
   const canBlockNow = scope === 'facility' || cageIds.length;
 
   async function run(fn) {
     setWorking(true);
     setErr(null);
-    try { await fn(); } catch (e) { setErr(e.message); }
+    try { await fn(); } catch (e) { setErr(cap(e.message)); }
     setWorking(false);
+  }
+
+  // Default auto-release: a day before the hold starts, or 2 hours before when
+  // that's already gone, or the next half hour when even that has passed.
+  function seedRelease() {
+    const soon = Date.now() + 30 * 60000;
+    let t = startsAt.getTime() - 24 * 3600000;
+    if (t < soon) t = startsAt.getTime() - 2 * 3600000;
+    if (t < soon) t = Math.ceil(soon / (step * 60000)) * step * 60000;
+    const p = localParts(new Date(t), tz);
+    setRelDate(p.ymd);
+    setRelTime(p.hm);
   }
 
   const pickResult = (r) => {
@@ -186,7 +218,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const book = () => run(async () => {
     let c = cust;
     if (who === 'new') {
-      const r = await createCustomer(nc);
+      const r = await createCustomer({ ...nc, phone: formatPhone(nc.phone) || '' });
       c = r.customer;
       setCust(c);
       setWho('account');
@@ -196,7 +228,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
       p_cage_ids: cageIds, p_starts_at: startsAt.toISOString(), p_ends_at: endsAt.toISOString(),
       p_kind: kind, p_user_id: who === 'guest' ? null : c.id,
       p_guest_name: who === 'guest' ? guest.name.trim() : null,
-      p_guest_phone: who === 'guest' ? guest.phone.trim() || null : null,
+      p_guest_phone: who === 'guest' ? formatPhone(guest.phone) || null : null,
       p_party_name: kind === 'party' ? party.name.trim() || null : null,
       p_guest_count: kind === 'party' && party.count ? Number(party.count) : null,
       p_notes: notes.trim() || null, p_payment: pay,
@@ -357,7 +389,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                         <input value={nc.lastName} onChange={(e) => setNc({ ...nc, lastName: e.target.value })} placeholder="Last name" style={field} />
                       </div>
                       <input type="email" value={nc.email} onChange={(e) => setNc({ ...nc, email: e.target.value })} placeholder="Email" style={field} />
-                      <input type="tel" value={nc.phone} onChange={(e) => setNc({ ...nc, phone: e.target.value })} placeholder="Phone (optional)" style={field} />
+                      <PhoneField value={nc.phone} onChange={(v) => setNc({ ...nc, phone: v })} placeholder="Phone (optional)" style={field} />
                       <div style={hint}>They can sign in later with this email and the booking will be in their account.</div>
                       <button onClick={() => setWho('account')} style={{ ...linkBtn, alignSelf: 'flex-start' }}>← Search existing customers</button>
                     </div>
@@ -365,7 +397,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <div style={grid2}>
                         <input value={guest.name} onChange={(e) => setGuest({ ...guest, name: e.target.value })} placeholder="Name" style={field} />
-                        <input type="tel" value={guest.phone} onChange={(e) => setGuest({ ...guest, phone: e.target.value })} placeholder="Phone" style={field} />
+                        <PhoneField value={guest.phone} onChange={(v) => setGuest({ ...guest, phone: v })} placeholder="Phone" style={field} />
                       </div>
                       <div style={hint}>No account and no email. Nothing is sent to them.</div>
                       <button onClick={() => setWho('account')} style={{ ...linkBtn, alignSelf: 'flex-start' }}>← Search existing customers</button>
@@ -398,7 +430,9 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
               ) : (
                 <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={label_}>Cages</div>
-                  <CageChips cages={cages} on={cageIds} toggle={toggleCage} />
+                  {isParty
+                    ? <div style={{ fontSize: 13.5, lineHeight: 1.5, padding: '10px 12px', borderRadius: 8, background: '#FBEDEF' }}><strong>Whole facility + mezzanine.</strong> A party reserves every cage.</div>
+                    : <CageChips cages={cages} on={cageIds} toggle={toggleCage} />}
                 </section>
               )}
 
@@ -466,7 +500,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
               {tab === 'hold' && (
                 <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, cursor: 'pointer', fontWeight: 600 }}>
-                    <input type="checkbox" checked={autoRel} onChange={(e) => setAutoRel(e.target.checked)} /> Release automatically if not booked
+                    <input type="checkbox" checked={autoRel} onChange={(e) => { setAutoRel(e.target.checked); if (e.target.checked) seedRelease(); }} /> Release automatically if not booked
                   </label>
                   {autoRel && (
                     <div style={grid2}>
@@ -490,9 +524,10 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                     {kind === 'party' && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 96px', gap: 8 }}>
                         <input value={party.name} onChange={(e) => setParty({ ...party, name: e.target.value })} placeholder="Party name, e.g. Jaden's 10th" style={field} />
-                        <input type="number" min="1" value={party.count} onChange={(e) => setParty({ ...party, count: e.target.value })} placeholder="Guests" style={field} />
+                        <input type="number" min="1" max={maxGuests} value={party.count} onChange={(e) => setParty({ ...party, count: e.target.value })} placeholder={`Guests (max ${maxGuests})`} style={{ ...field, ...(guestsOk ? null : { borderColor: RED }) }} />
                       </div>
                     )}
+                    {isParty && !guestsOk && <div style={{ fontSize: 12, color: RED }}>Parties are limited to {maxGuests} guests.</div>}
                   </section>
 
                   <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -506,7 +541,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                         <div style={{ padding: '10px 12px', color: RED, fontSize: 13 }}>{quoteErr}</div>
                       ) : (
                         <>
-                          <div style={sumRow}><span>{cageIds.length ? `${durLabel(dur)} × ${cageIds.length} cage${cageIds.length > 1 ? 's' : ''}` : 'Pick a cage'}</span><span>{quote ? money(gross) : '—'}</span></div>
+                          <div style={sumRow}><span>{isParty ? `Party package · ${durLabel(dur)}` : cageIds.length ? `${durLabel(dur)} × ${cageIds.length} cage${cageIds.length > 1 ? 's' : ''}` : 'Pick a cage'}</span><span>{quote ? money(gross) : '—'}</span></div>
                           {kind === 'membership' && quote?.out_hours_covered > 0 && <div style={{ ...sumRow, ...sub }}><span>{Number(quote.out_hours_covered)} hrs from their membership</span><span>covered</span></div>}
                           {deposit && <div style={{ ...sumRow, ...sub }}><span>Balance at the party</span><span>{money(gross - due)}</span></div>}
                           <div style={{ ...sumRow, fontWeight: 700, borderTop: '1px solid rgba(0,0,0,.08)' }}>

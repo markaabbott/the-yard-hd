@@ -191,7 +191,7 @@ export default function BookingPanel({ cage, startsAt, slotMinutes, userId, onCl
             ) : clientSecret ? (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderBottom: '1px solid rgba(0,0,0,.08)', paddingBottom: 14 }}>
-                  <span style={{ color: 'rgba(0,0,0,.6)' }}>{hours} hr · due now</span>
+                  <span style={{ color: 'rgba(0,0,0,.6)' }}>{hours < 1 ? '30 min' : `${hours} hr`} · due now</span>
                   <span style={{ fontWeight: 700 }}>{money(quote?.out_gross_cents ?? 0)}</span>
                 </div>
                 <PaymentForm clientSecret={clientSecret} onSuccess={() => setPaid(true)} />
@@ -208,10 +208,10 @@ export default function BookingPanel({ cage, startsAt, slotMinutes, userId, onCl
                 <div>
                   <label style={{ fontSize: 12.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'rgba(0,0,0,.6)' }}>Duration</label>
                   <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    {[1, 1.5, 2, 3].map((h) => (
+                    {[0.5, 1, 1.5, 2].map((h) => (
                       <button key={h} onClick={() => setHours(h)}
                         style={{ padding: '8px 14px', borderRadius: 7, border: hours === h ? '1.5px solid #BA0C2F' : '1px solid rgba(0,0,0,.15)', background: hours === h ? 'rgba(186,12,47,.06)' : '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600 }}>
-                        {h} hr
+                        {h < 1 ? '30 min' : `${h} hr`}
                       </button>
                     ))}
                   </div>

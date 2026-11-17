@@ -30,6 +30,7 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
       const p = paid.get(r.group_id);
       g.paidCents = p?.amount_cents || 0;
       g.feeCents = p?.method === 'card' ? p.processing_fee_cents || 0 : 0;
+      g.method = p?.method || null;
       byGroup.set(r.group_id, g);
     }
     setGroups([...byGroup.values()]);
@@ -57,11 +58,14 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
     setWorking(false);
     setConfirming(null);
     if (!r.ok) { setNotice({ error: true, text: body.error || 'Could not cancel. Please call us.' }); return; }
+    const toCard = g.method === 'card';
     setNotice({
       text: body.refundError
         ? `Canceled. Your refund is being processed by staff; call ${settings.phone} with questions.`
         : body.refundCents > 0
-          ? `Canceled. ${money(body.refundCents)} is on its way back to your card. Check your email for the details.`
+          ? (toCard
+            ? `Canceled. ${money(body.refundCents)} is on its way back to your card. Check your email for the details.`
+            : `Canceled. We'll return ${money(body.refundCents)} to you at the front desk. Check your email for the details.`)
           : 'Canceled. Check your email for the details.',
     });
     load();
