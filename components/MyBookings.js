@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { authFetch } from '../lib/authFetch';
 
 const RED = '#BA0C2F';
 const money = (c) => `$${(c / 100).toFixed(2)}`;
@@ -50,12 +51,7 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
 
   async function cancel(g) {
     setWorking(true);
-    const { data: { session } } = await supabase.auth.getSession();
-    const r = await fetch('/api/cancel-booking', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-      body: JSON.stringify({ groupId: g.groupId }),
-    });
+    const r = await authFetch('/api/cancel-booking', { method: 'POST', body: JSON.stringify({ groupId: g.groupId }) });
     const body = await r.json().catch(() => ({}));
     setWorking(false);
     setConfirming(null);

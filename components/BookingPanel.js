@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import PaymentForm from './PaymentForm';
 import PhoneField from './PhoneField';
 import { formatPhone, isPhoneOk } from '../lib/phone';
+import { authFetch } from '../lib/authFetch';
 
 function money(cents) { return '$' + (cents / 100).toFixed(2); }
 const lenLabel = (h) => (h < 1 ? '30 min' : `${h} hr`);
@@ -54,16 +55,7 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
     function bail() {
       const { groupId: g, paid: p } = holdRef.current;
       if (!g || p) return;
-      supabase.auth.getSession().then(({ data }) => {
-        const token = data?.session?.access_token;
-        if (!token) return;
-        fetch('/api/release-hold', {
-          method: 'POST',
-          keepalive: true,
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ groupId: g })
-        }).catch(() => {});
-      });
+      authFetch('/api/release-hold', { method: 'POST', keepalive: true, body: JSON.stringify({ groupId: g }) }).catch(() => {});
     }
     window.addEventListener('pagehide', bail);
     return () => { window.removeEventListener('pagehide', bail); bail(); };
@@ -139,13 +131,8 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
 
     setClosing(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token;
-      await fetch('/api/release-hold', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ groupId })
-      });
+      const r = await authFetch('/api/release-hold', { method: 'POST', body: JSON.stringify({ groupId }) });
+      if (!r.ok) console.error('[booking] release refused', r.status);
     } catch (e) {
       console.error('[booking] release failed', e);
     }

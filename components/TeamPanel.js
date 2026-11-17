@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import PaymentForm from './PaymentForm';
+import { authFetch } from '../lib/authFetch';
 
 const money = (c) => `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`;
 const LEAGUES = [{ k: 'rec', t: 'Rec' }, { k: 'school', t: 'School' }, { k: 'travel', t: 'Travel' }];
@@ -37,15 +38,7 @@ export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, on
     function bail() {
       const { seriesId, paid: p } = live.current;
       if (!seriesId || p) return;
-      supabase.auth.getSession().then(({ data }) => {
-        const token = data?.session?.access_token;
-        if (!token) return;
-        fetch('/api/release-hold', {
-          method: 'POST', keepalive: true,
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ seriesId })
-        }).catch(() => {});
-      });
+      authFetch('/api/release-hold', { method: 'POST', keepalive: true, body: JSON.stringify({ seriesId }) }).catch(() => {});
     }
     window.addEventListener('pagehide', bail);
     return () => { window.removeEventListener('pagehide', bail); bail(); };
@@ -82,12 +75,7 @@ export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, on
     if (signup?.series_id) {
       setWorking(true);
       try {
-        const { data } = await supabase.auth.getSession();
-        await fetch('/api/release-hold', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data?.session?.access_token}` },
-          body: JSON.stringify({ seriesId: signup.series_id })
-        });
+        await authFetch('/api/release-hold', { method: 'POST', body: JSON.stringify({ seriesId: signup.series_id }) });
       } catch (e) { console.error('[team] release failed', e); }
       live.current = { seriesId: null, paid: false };
     }
