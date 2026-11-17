@@ -177,8 +177,20 @@ export default function Schedule() {
   }
 
   const wholeFacility = mode === 'party' || mode === 'team';
+  // A start time only counts as open when the shortest party package (or a
+  // 1-hour practice) fits: every cage free for the whole span, before closing.
+  const minSpan = mode === 'party'
+    ? Math.min(...Object.keys(settings?.party_packages || { 120: 1 }).map(Number))
+    : 60;
   function isFacilityTaken(slotStart) {
-    return cages.some((c) => isTaken(c.id, slotStart));
+    const step = settings?.slot_minutes || 30;
+    const last = slots.length ? slots[slots.length - 1].getTime() + step * 60000 : 0;
+    if (slotStart.getTime() + minSpan * 60000 > last) return true;
+    for (let t = 0; t < minSpan; t += step) {
+      const at = new Date(slotStart.getTime() + t * 60000);
+      if (cages.some((c) => isTaken(c.id, at))) return true;
+    }
+    return false;
   }
 
   function isTaken(cageId, slotStart) {
@@ -279,7 +291,7 @@ export default function Schedule() {
                   return (
                     <button disabled={disabled} onClick={() => setSelected({ kind: mode, cages, startsAt: s })}
                       style={{ ...cellSlot, background: disabled ? 'rgba(0,0,0,.05)' : '#fff', color: disabled ? 'rgba(0,0,0,.25)' : '#111', cursor: disabled ? 'not-allowed' : 'pointer' }}>
-                      {taken ? 'Booked' : s < now ? '—' : 'Open'}
+                      {s < now ? '—' : cages.some((c) => isTaken(c.id, s)) ? 'Booked' : taken ? `Needs ${minSpan / 60} hr free` : 'Open'}
                     </button>
                   );
                 })() : cages.map((c) => {
