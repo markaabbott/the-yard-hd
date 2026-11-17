@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import PaymentForm from './PaymentForm';
+import PhoneField from './PhoneField';
+import { formatPhone, isPhoneOk } from '../lib/phone';
 
 function money(cents) { return '$' + (cents / 100).toFixed(2); }
 const lenLabel = (h) => (h < 1 ? '30 min' : `${h} hr`);
@@ -19,6 +21,8 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
   const [hours, setHours] = useState(isParty ? partyHours[0] : 1);
   const [partyName, setPartyName] = useState('');
   const [guests, setGuests] = useState('');
+  const [phone, setPhone] = useState('');
+  const [partyNotes, setPartyNotes] = useState('');
   const [quote, setQuote] = useState(null);
   const [quoting, setQuoting] = useState(true);
   const [booking, setBooking] = useState(false);
@@ -88,7 +92,8 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
   const covered = Number(quote?.out_hours_covered || 0);
   const dueNow = isParty && gross > 0 ? Math.max(Math.floor((gross * depositPct) / 100), 1) : gross;
   const guestsOk = !isParty || (Number(guests) >= 1 && Number(guests) <= maxGuests);
-  const ready = !quoting && !err && (!isParty || (partyName.trim() && guestsOk));
+  const phoneOk = !isParty || (phone.trim() && isPhoneOk(phone));
+  const ready = !quoting && !err && (!isParty || (partyName.trim() && guestsOk && phoneOk));
 
   async function confirm() {
     setBooking(true);
@@ -99,7 +104,10 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
       p_ends_at: endsAt.toISOString(),
       p_kind: kind,
       p_user_id: userId,
-      ...(isParty ? { p_party_name: partyName.trim(), p_guest_count: Number(guests) } : {})
+      ...(isParty ? {
+        p_party_name: partyName.trim(), p_guest_count: Number(guests),
+        p_contact_phone: formatPhone(phone) || null, p_notes: partyNotes.trim() || null,
+      } : {})
     });
     if (error) { setBooking(false); setErr(error.message); return; }
 
@@ -180,6 +188,7 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, borderTop: '1px solid rgba(0,0,0,.08)', paddingTop: 14 }}>
+                  {isParty && <Row k="Party" v={`${partyName.trim()} · ${guests} guests`} />}
                   {covered > 0 && <Row k="Member hours used" v={`${covered} hr`} />}
                   <Row k={isParty ? 'Deposit paid' : 'Paid'} v={money(paidCents)} bold />
                   {isParty && balance > 0 && <Row k="Balance due at the party" v={money(balance)} />}
@@ -225,6 +234,13 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
                       <input type="number" min="1" max={maxGuests} value={guests} onChange={(e) => setGuests(e.target.value)} placeholder={`Up to ${maxGuests}`} style={{ ...inputStyle, ...(guests && !guestsOk ? { borderColor: '#BA0C2F' } : null) }} />
                     </label>
                     {guests && !guestsOk && <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: '#BA0C2F' }}>Parties are limited to {maxGuests} guests.</div>}
+                    <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Phone on the day
+                      <PhoneField value={phone} onChange={setPhone} placeholder="(760) 555-0100" style={inputStyle} />
+                    </label>
+                    <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Anything we should know? (optional)
+                      <textarea value={partyNotes} onChange={(e) => setPartyNotes(e.target.value)} rows={2} maxLength={500}
+                        placeholder="e.g. Birthday for Jaden, turning 10. Bringing a cake to the mezzanine." style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+                    </label>
                   </div>
                 )}
 

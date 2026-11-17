@@ -14,23 +14,25 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
 
   const load = useCallback(async () => {
     const [{ data: res }, { data: pays }] = await Promise.all([
-      supabase.from('reservations').select('group_id, starts_at, ends_at, cages(name, sort_order)')
+      supabase.from('reservations').select('group_id, starts_at, ends_at, kind, party_name, guest_count, cages(name, sort_order)')
         .eq('user_id', userId).eq('status', 'confirmed').neq('kind', 'team').gt('starts_at', new Date().toISOString())
         .order('starts_at'),
-      supabase.from('payments').select('reservation_group_id, amount_cents, method, processing_fee_cents')
+      supabase.from('payments').select('reservation_group_id, amount_cents, method, processing_fee_cents, is_deposit, balance_due_cents, balance_settled_at')
         .eq('user_id', userId).eq('entry_type', 'charge').eq('status', 'succeeded'),
     ]);
     const paid = new Map((pays || []).map((p) => [p.reservation_group_id, p]));
     const byGroup = new Map();
     for (const r of res || []) {
-      const g = byGroup.get(r.group_id) || { groupId: r.group_id, startsAt: r.starts_at, endsAt: r.ends_at, cages: [] };
+      const g = byGroup.get(r.group_id) || { groupId: r.group_id, startsAt: r.starts_at, endsAt: r.ends_at, cages: [], kind: r.kind, partyName: r.party_name, guests: r.guest_count };
       if (r.starts_at < g.startsAt) g.startsAt = r.starts_at;
       if (r.ends_at > g.endsAt) g.endsAt = r.ends_at;
-      if (r.cages && !g.cages.includes(r.cages.name)) g.cages.push(r.cages.name);
+      if (r.cages && !g.cages.some((c) => c.name === r.cages.name)) g.cages.push(r.cages);
+      g.cages.sort((a, b) => a.sort_order - b.sort_order);
       const p = paid.get(r.group_id);
       g.paidCents = p?.amount_cents || 0;
       g.feeCents = p?.method === 'card' ? p.processing_fee_cents || 0 : 0;
       g.method = p?.method || null;
+      g.balanceCents = p?.is_deposit && !p.balance_settled_at ? p.balance_due_cents || 0 : 0;
       byGroup.set(r.group_id, g);
     }
     setGroups([...byGroup.values()]);
@@ -94,9 +96,17 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
           return (
             <div key={g.groupId} style={{ borderTop: i ? '1px solid rgba(0,0,0,.08)' : 'none', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 14 }}>
-                  <strong>{fmtDate(g.startsAt)}</strong> · {fmtTime(g.startsAt)} – {fmtTime(g.endsAt)}
-                  <span style={{ color: 'rgba(0,0,0,.55)' }}> · {g.cages.join(', ')}</span>
+                <div style={{ fontSize: 14, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span>
+                    {g.kind === 'party' && <strong style={{ color: RED }}>{g.partyName || 'Party'} · </strong>}
+                    <strong>{fmtDate(g.startsAt)}</strong> · {fmtTime(g.startsAt)} – {fmtTime(g.endsAt)}
+                    <span style={{ color: 'rgba(0,0,0,.55)' }}> · {g.kind === 'party' ? 'Whole facility + mezzanine' : g.cages.map((c) => c.name).join(', ')}</span>
+                  </span>
+                  {g.kind === 'party' && (
+                    <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>
+                      {g.guests ? `${g.guests} guests · ` : ''}Deposit paid {money(g.paidCents)}{g.balanceCents > 0 ? ` · ${money(g.balanceCents)} due at the party` : ''}
+                    </span>
+                  )}
                 </div>
                 {!open && (
                   <button onClick={() => { setConfirming(g.groupId); setNotice(null); }} style={{ border: 'none', background: 'none', padding: 0, fontSize: 13, color: 'rgba(0,0,0,.55)', textDecoration: 'underline', cursor: 'pointer' }}>
