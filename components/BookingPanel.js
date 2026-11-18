@@ -33,6 +33,7 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
   const [result, setResult] = useState(null);
   const [paid, setPaid] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [expired, setExpired] = useState(false); // the checkout hold ran out before payment
 
   // Kept in a ref so the unmount cleanup can read the live values without
   // re-running the effect every render.
@@ -60,6 +61,19 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
     window.addEventListener('pagehide', bail);
     return () => { window.removeEventListener('pagehide', bail); bail(); };
   }, []);
+
+  // The slot is only held for a few minutes. When that runs out, take the card
+  // form away and cancel the payment so a late "Pay" can't charge for a slot
+  // that's no longer ours (the server refunds one anyway, as a backstop).
+  useEffect(() => {
+    if (!clientSecret || paid || !result?.hold_expires_at || !groupId) return;
+    const ms = new Date(result.hold_expires_at).getTime() - Date.now();
+    const t = setTimeout(() => {
+      setExpired(true);
+      authFetch('/api/release-hold', { method: 'POST', body: JSON.stringify({ groupId }) }).catch(() => {});
+    }, Math.max(0, ms));
+    return () => clearTimeout(t);
+  }, [clientSecret, paid, result?.hold_expires_at, groupId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,12 +196,24 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
                 </div>
                 <button onClick={dismiss} style={primaryBtn}>Done</button>
               </>
+            ) : expired ? (
+              <>
+                <div style={{ fontSize: 13.5, lineHeight: 1.6, padding: '12px 14px', borderRadius: 9, background: '#FFF4DE' }}>
+                  Your hold on this time ran out before payment went through, so nothing was charged. Pick the time again to book it.
+                </div>
+                <button onClick={dismiss} disabled={closing} style={primaryBtn}>Back to the schedule</button>
+              </>
             ) : clientSecret ? (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderBottom: '1px solid rgba(0,0,0,.08)', paddingBottom: 14 }}>
                   <span style={{ color: 'rgba(0,0,0,.6)' }}>{isParty ? `${lenLabel(hours)} party · deposit due now` : `${lenLabel(hours)} · due now`}</span>
                   <span style={{ fontWeight: 700 }}>{money(result?.due_now_cents ?? dueNow)}</span>
                 </div>
+                {result?.hold_expires_at && (
+                  <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)', marginTop: -6 }}>
+                    We're holding this time until {new Date(result.hold_expires_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.
+                  </div>
+                )}
                 <PaymentForm clientSecret={clientSecret} onSuccess={() => setPaid(true)} />
                 <button onClick={dismiss} disabled={closing} style={{ border: 'none', background: 'none', fontSize: 13, color: 'rgba(0,0,0,.5)', cursor: closing ? 'default' : 'pointer', textDecoration: 'underline', padding: 0 }}>
                   {closing ? 'Releasing your hold…' : 'Cancel and release this time'}

@@ -117,7 +117,9 @@ export default function MyBookings({ userId, settings, tz, onChange }) {
                       ? (frac === 1 ? 'Your membership hours will be returned.' : 'Past the free-cancel window, so membership hours won\'t be returned.')
                       : frac === 0
                         ? <>Starts in under {settings.cancel_half_hours} hours. <strong>No refund.</strong></>
-                        : <>You'll be refunded <strong>{money(cents)}</strong>{frac < 1 ? ` (50% of ${money(g.paidCents)}` : ` (${money(g.paidCents)}`}{fee > 0 ? `, less ${money(fee)} card fee)` : ')'}.</>}
+                        : <>You'll be refunded <strong>{money(cents)}</strong>{frac < 1
+                          ? ` (50% of ${money(g.paidCents)}${fee > 0 ? `, less the ${money(fee)} card fee` : ''})`
+                          : fee > 0 ? ` (${money(g.paidCents)} less the ${money(fee)} card fee)` : ''}.</>}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button disabled={working} onClick={() => setConfirming(null)} style={{ padding: '9px 14px', borderRadius: 6, border: '1px solid rgba(0,0,0,.15)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
