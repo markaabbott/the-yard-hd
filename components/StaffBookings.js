@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { STATES } from '../lib/staffStates';
 import { staffAction } from '../lib/staffApi';
+import { formatPhone } from '../lib/phone';
 
 const RED = '#BA0C2F';
 const money = (c) => `$${(c / 100).toFixed(2)}`;
@@ -24,7 +25,7 @@ export default function StaffBookings({ groups = [], tz, onOpen, onChanged }) {
 
   const shown = rows.filter(({ g }) => {
     const t = q.trim().toLowerCase();
-    return !t || `${g.title} ${g.name} ${g.phone || ''} ${g.cages.join(' ')}`.toLowerCase().includes(t);
+    return !t || `${g.title} ${g.name} ${g.phone || ''} ${formatPhone(g.phone) || ''} ${(g.phone || '').replace(/\D/g, '')} ${g.cages.join(' ')}`.toLowerCase().includes(t);
   });
   const noShows = rows.filter((r) => r.noShow).length;
   const owedTotal = rows.reduce((a, r) => a + r.owed, 0);
@@ -76,7 +77,7 @@ export default function StaffBookings({ groups = [], tz, onOpen, onChanged }) {
                   <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: st.bg, color: st.fg, border: st.border || 'none' }}>{st.label}</span>
                 </span>
                 <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>
-                  {g.kindLabel} · {g.cages.join(', ')}{g.guestCount ? ` · ${g.guestCount} guests` : ''}{g.title !== g.name ? ` · ${g.name}` : ''}{g.phone ? ` · ${g.phone}` : ''}
+                  {g.kindLabel} · {g.cages.join(', ')}{g.guestCount ? ` · ${g.guestCount} guests` : ''}{g.title !== g.name ? ` · ${g.name}` : ''}{g.phone ? ` · ${formatPhone(g.phone) || g.phone}` : ''}
                 </span>
               </button>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>

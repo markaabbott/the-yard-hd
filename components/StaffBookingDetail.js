@@ -196,7 +196,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
             <div style={label}>Payment</div>
             {ledger.length === 0 && !g.dueCents ? (
               <div style={{ fontSize: 14, color: 'rgba(0,0,0,.6)' }}>
-                {g.payState === 'member' ? 'Paid with membership hours.' : g.payState === 'holding' ? 'Checkout in progress.' : g.comp ? `No charge · ${g.comp}` : 'No payment recorded.'}
+                {g.kind === 'team' && g.teamPaidThrough ? (g.teamPaid ? `Covered by the team's four-week cycle (paid through ${new Date(`${g.teamPaidThrough}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}).` : `Next team cycle not paid yet (paid through ${new Date(`${g.teamPaidThrough}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}).`) : g.payState === 'member' ? 'Paid with membership hours.' : g.payState === 'holding' ? 'Checkout in progress.' : g.comp ? `No charge · ${g.comp}` : 'No payment recorded.'}
               </div>
             ) : (
               <div style={{ border: '1px solid rgba(0,0,0,.1)', borderRadius: 8 }}>
