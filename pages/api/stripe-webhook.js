@@ -34,12 +34,13 @@ export default async function handler(req, res) {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const pi = event.data.object;
+        // Stripe often hasn't attached the balance transaction (which holds
+        // the fee) when this event fires. Ask for it expanded; if it's still
+        // missing, the charge.updated case below fills the fee in later.
         const charge = pi.latest_charge
-          ? await stripe.charges.retrieve(pi.latest_charge)
+          ? await stripe.charges.retrieve(pi.latest_charge, { expand: ['balance_transaction'] })
           : null;
-        const feeCents = charge?.balance_transaction
-          ? (await stripe.balanceTransactions.retrieve(charge.balance_transaction)).fee
-          : 0;
+        const feeCents = charge?.balance_transaction?.fee ?? 0;
 
         const { error } = await supabase.rpc('confirm_payment', {
           p_intent_id: pi.id,
@@ -59,6 +60,25 @@ export default async function handler(req, res) {
           p_intent_id: pi.id,
           p_reason: pi.last_payment_error?.message || 'card declined'
         });
+        if (error) throw error;
+        break;
+      }
+
+      // The fee shows up on the charge after payment_intent.succeeded. Record
+      // it on the payment so "customer pays the card fee" refunds work.
+      // (Subscribe the endpoint to charge.updated in Stripe.)
+      case 'charge.updated': {
+        const ch = event.data.object;
+        if (!ch.payment_intent || !ch.balance_transaction || ch.status !== 'succeeded') break;
+        const btId = typeof ch.balance_transaction === 'string' ? ch.balance_transaction : ch.balance_transaction.id;
+        const bt = await stripe.balanceTransactions.retrieve(btId);
+        if (!bt?.fee) break;
+        const { error } = await supabase.from('payments')
+          .update({ processing_fee_cents: bt.fee })
+          .eq('stripe_payment_intent_id', ch.payment_intent)
+          .eq('entry_type', 'charge')
+          .eq('method', 'card')
+          .or('processing_fee_cents.is.null,processing_fee_cents.eq.0');
         if (error) throw error;
         break;
       }
