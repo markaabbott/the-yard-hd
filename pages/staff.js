@@ -166,11 +166,11 @@ export default function Staff() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {data && (
-            <div role="tablist" style={{ display: 'flex', gap: 22, marginBottom: 6 }}>
+            <div role="tablist" style={{ display: 'flex', flexWrap: 'wrap', columnGap: 'clamp(12px, 4vw, 22px)', rowGap: 4, marginBottom: 6 }}>
               {[['schedule', 'Schedule'], ['bookings', 'Bookings'], ...(perms.reports ? [['reports', 'Reports']] : []), ...(perms.team ? [['team', 'Team']] : [])].map(([k, l]) => (
                 <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)} style={{
                   border: 'none', background: 'none', padding: '0 0 6px', cursor: 'pointer',
-                  fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 28, textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1,
+                  fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 'clamp(20px, 6vw, 28px)', textTransform: 'uppercase', letterSpacing: '.03em', lineHeight: 1.1,
                   color: view === k ? '#111' : 'rgba(0,0,0,.3)', borderBottom: `3px solid ${view === k ? RED : 'transparent'}`,
                 }}>{l}</button>
               ))}
