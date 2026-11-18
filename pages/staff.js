@@ -57,7 +57,12 @@ export default function Staff() {
     userIdRef.current = id;
   }, [loading, user?.id, router]);
 
+  // Only the newest request may update the grid. Changing days (or a realtime
+  // reload) while an older request is still in flight must not let that older
+  // day's bookings land on the new day.
+  const loadSeq = React.useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     const start = zonedTimeToUtc(dayYmd, 0, 0, tz);
     const end = zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz);
     const { data: { session } } = await supabase.auth.getSession();
@@ -68,9 +73,10 @@ export default function Staff() {
     if (r.status === 401) { router.replace('/signin'); return; }
     if (r.status === 403) { router.replace('/schedule'); return; }
     const body = await r.json().catch(() => ({}));
+    if (seq !== loadSeq.current) return; // a newer load has started; drop this one
     if (!r.ok) { setError(body.error || 'Could not load the schedule.'); return; }
     setError(null);
-    setData(body);
+    setData({ ...body, _day: dayYmd });
     if (body.settings?.timezone && body.settings.timezone !== tz) setTz(body.settings.timezone);
   }, [dayYmd, tz, router]);
 
@@ -86,7 +92,7 @@ export default function Staff() {
   }, [user, load]);
 
   const grid = useMemo(() => {
-    if (!data?.settings) return null;
+    if (!data?.settings || data._day !== dayYmd) return null;
     const s = data.settings;
     const slotMs = s.slot_minutes * 60000;
     const [oh, om] = s.open_time.split(':').map(Number);
@@ -178,9 +184,9 @@ export default function Staff() {
           </div>
           {data && view !== 'team' && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-              <button onClick={() => setNewOpen({ tab: 'booking' })} style={{ ...newBtn, background: RED, color: '#fff', border: 'none' }}>+ Book for a customer</button>
-              <button onClick={() => setNewOpen({ tab: 'hold' })} style={newBtn}>Hold time</button>
-              {data.canBlock && <button onClick={() => setNewOpen({ tab: 'block' })} style={newBtn}>Block time</button>}
+              <button onClick={() => setNewOpen({ tab: 'booking', day: dayYmd })} style={{ ...newBtn, background: RED, color: '#fff', border: 'none' }}>+ Book for a customer</button>
+              <button onClick={() => setNewOpen({ tab: 'hold', day: dayYmd })} style={newBtn}>Hold time</button>
+              {data.canBlock && <button onClick={() => setNewOpen({ tab: 'block', day: dayYmd })} style={newBtn}>Block time</button>}
               <button onClick={() => setCustOpen({})} style={newBtn}>Customers</button>
             </div>
           )}
