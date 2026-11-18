@@ -42,6 +42,20 @@ export default async function handler(req, res) {
           : null;
         const feeCents = charge?.balance_transaction?.fee ?? 0;
 
+        // Paid after the hold was already released (expired or abandoned)?
+        // The slot may belong to someone else now, so don't book it: refund
+        // in full and note it on the payment.
+        if (await lateForReleasedHold(pi.id)) {
+          const refund = await stripe.refunds.create(
+            { payment_intent: pi.id, reason: 'requested_by_customer', metadata: { why: 'hold expired before payment' } },
+            { idempotencyKey: `late-hold-refund:${pi.id}` });
+          await supabase.from('payments')
+            .update({ memo: 'paid after the hold expired; refunded in full', stripe_refund_id: refund.id })
+            .eq('stripe_payment_intent_id', pi.id);
+          console.warn('[webhook] late payment for released hold refunded', pi.id, refund.id);
+          break;
+        }
+
         const { error } = await supabase.rpc('confirm_payment', {
           p_intent_id: pi.id,
           p_amount_cents: pi.amount_received,
@@ -101,4 +115,26 @@ export default async function handler(req, res) {
   }
 
   res.status(200).json({ received: true });
+}
+
+// True when this intent's payment was already written off (status 'failed')
+// AND nothing it paid for is still waiting: the reservation hold or team
+// sign-up was released. A card that was declined and then retried on the same
+// intent keeps its hold alive, so it is not caught here.
+async function lateForReleasedHold(intentId) {
+  const { data: p } = await supabase.from('payments')
+    .select('status, reservation_group_id, series_id')
+    .eq('stripe_payment_intent_id', intentId).maybeSingle();
+  if (!p || p.status !== 'failed') return false;
+  if (p.reservation_group_id) {
+    const { data: rows } = await supabase.from('reservations').select('status')
+      .eq('group_id', p.reservation_group_id);
+    return !(rows || []).some((r) => ['pending_payment', 'confirmed'].includes(r.status));
+  }
+  if (p.series_id) {
+    const { data: ser } = await supabase.from('reservation_series').select('status, paid_through')
+      .eq('id', p.series_id).maybeSingle();
+    return !!ser && !ser.paid_through && !['active', 'past_due'].includes(ser.status);
+  }
+  return false;
 }

@@ -59,6 +59,14 @@ export default async function handler(req, res) {
   // Already paid? Leave it alone — cancelling a confirmed booking goes through
   // cancel_reservation_group so the refund policy gets applied.
   if (!rows.some((r) => r.status === 'pending_payment')) {
+    // The sweeper may have expired the hold already (payment marked failed)
+    // while the customer still had the card form open. Cancel that intent so
+    // a late "Pay" can't go through for a slot we no longer hold.
+    if (!rows.some((r) => r.status === 'confirmed')) {
+      const { data: stale } = await supabase.from('payments').select('stripe_payment_intent_id')
+        .eq('reservation_group_id', groupId).eq('status', 'failed');
+      for (const p of stale || []) await cancelIntent(p.stripe_payment_intent_id);
+    }
     return res.status(200).json({ released: 0, reason: 'not a pending hold' });
   }
 
