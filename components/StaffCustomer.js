@@ -93,7 +93,7 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                 {walk && <span style={{ alignSelf: 'flex-start', padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#F2F0ED', color: 'rgba(0,0,0,.6)', marginBottom: 2 }}>Walk-in · no account</span>}
                 {!walk && <span style={{ display: 'flex', marginBottom: 2 }}><RoleBadge role={c.role} big /></span>}
                 {c.email && <a href={`mailto:${c.email}`} style={{ color: '#111' }}>{c.email}</a>}
-                {(walk ? c.phones : [c.phone].filter(Boolean)).map((ph) => <a key={ph} href={`tel:${ph.replace(/\D/g, '')}`} style={{ color: '#111' }}>{ph}</a>)}
+                {(walk ? c.phones : [c.phone].filter(Boolean)).map((ph) => <a key={ph} href={`tel:${ph.replace(/\D/g, '')}`} style={{ color: '#111' }}>{formatPhone(ph) || ph}</a>)}
                 {!(walk ? c.phones.length : c.phone) && <span style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</span>}
                 {c.teams?.length > 0 && <span style={{ fontSize: 13 }}>{c.teams.join(' · ')}</span>}
                 <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.5)' }}>{walk ? 'First booking' : 'Customer since'} {new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
@@ -134,8 +134,8 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                   {r.teams?.length > 0 && <span style={{ fontSize: 12.5, fontWeight: 600, color: '#111' }}>{r.teams.join(' · ')}</span>}
                   <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>
                     {r.type === 'walkin'
-                      ? [r.phone, `${r.bookings} booking${r.bookings === 1 ? '' : 's'}`].filter(Boolean).join(' · ')
-                      : `${r.email}${r.phone ? ` · ${r.phone}` : ''}${r.memberHours != null ? ` · ${r.memberHours} hr left` : ''}`}
+                      ? [r.phone && (formatPhone(r.phone) || r.phone), `${r.bookings} booking${r.bookings === 1 ? '' : 's'}`].filter(Boolean).join(' · ')
+                      : `${r.email}${r.phone ? ` · ${formatPhone(r.phone) || r.phone}` : ''}${r.memberHours != null ? ` · ${r.memberHours} hr left` : ''}`}
                   </span>
                 </button>
               ))}

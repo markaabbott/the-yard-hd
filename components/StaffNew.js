@@ -46,7 +46,9 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const maxGuests = settings?.party_max_guests ?? 30;
 
   const seedStart = fromHold?.startsAt || initial.startsAt;
-  const start0 = seedStart ? localParts(seedStart, tz) : { ymd: todayYmd(tz), hm: hmOf(openM) };
+  // Opened from the toolbar: start on the day the grid is showing (never a past day).
+  const day0 = initial.day && initial.day > todayYmd(tz) ? initial.day : todayYmd(tz);
+  const start0 = seedStart ? localParts(seedStart, tz) : { ymd: day0, hm: hmOf(openM) };
   const dur0 = fromHold ? Math.round((new Date(fromHold.endsAt) - new Date(fromHold.startsAt)) / 60000) : 60;
 
   const [tab, setTab] = useState(fromHold ? 'booking' : initial.tab || 'booking');
@@ -65,7 +67,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [nc, setNc] = useState({ firstName: '', lastName: '', email: '', phone: '' });
-  const [guest, setGuest] = useState({ name: walkSeed?.name || '', phone: walkSeed?.phone || '' });
+  const [guest, setGuest] = useState({ name: walkSeed?.name || '', phone: formatPhone(walkSeed?.phone) || walkSeed?.phone || '' });
   const [kind, setKind] = useState('drop_in');
   const [party, setParty] = useState({ name: '', count: '' });
   const [pay, setPay] = useState('card');
@@ -96,6 +98,14 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   const [repeat, setRepeat] = useState('none'); // none | weekly | biweekly
   const [days, setDays] = useState([wd0]);
   const [until, setUntil] = useState(addDaysYmd(start0.ymd, 7 * 12));
+  // Weekday chips follow the first date until staff pick days themselves, so
+  // changing the date never silently skips it (it used to keep the weekday of
+  // the date the panel opened on).
+  const daysPicked = useRef(false);
+  useEffect(() => {
+    if (daysPicked.current || !date) return;
+    setDays([new Date(`${date}T12:00:00Z`).getUTCDay()]);
+  }, [date]);
   const [skipList, setSkipList] = useState(null); // conflicts from a repeat check
   const startsAt = useMemo(() => at(date, time, tz), [date, time, tz]);
   const endsAt = new Date(startsAt.getTime() + dur * 60000);
@@ -192,7 +202,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
   }
 
   const pickResult = (r) => {
-    if (r.type === 'walkin') { setWho('guest'); setGuest({ name: r.name, phone: r.phone || '' }); setQuery(''); return; }
+    if (r.type === 'walkin') { setWho('guest'); setGuest({ name: r.name, phone: formatPhone(r.phone) || r.phone || '' }); setQuery(''); return; }
     setCust(r);
   };
 
@@ -358,7 +368,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 13.5, lineHeight: 1.45, minWidth: 0 }}>
                         <strong style={{ fontSize: 14 }}>{cust.name}</strong>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{cust.email}</span>
-                        {cust.phone && <span>{cust.phone}</span>}
+                        {cust.phone && <span>{formatPhone(cust.phone) || cust.phone}</span>}
                         {cust.memberHours != null && <span style={{ color: RED, fontWeight: 600 }}>Member · {cust.memberHours} hrs left</span>}
                       </div>
                       <button onClick={() => { setCust(null); setQuery(''); }} style={linkBtn}>Change</button>
@@ -371,7 +381,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                           {results.map((r, i) => (
                             <button key={r.id} onClick={() => pickResult(r)} style={{ width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderTop: i ? '1px solid rgba(0,0,0,.07)' : 'none', background: '#fff', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
                               <span style={{ fontSize: 13.5, fontWeight: 700, color: '#111' }}>{r.name}{r.type === 'walkin' ? <span style={{ color: 'rgba(0,0,0,.5)', fontWeight: 600 }}> · walk-in</span> : null}{r.memberHours != null ? <span style={{ color: RED, fontWeight: 600 }}> · member</span> : null}</span>
-                              <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{[...(r.teams || []), r.email, r.phone].filter(Boolean).join(' · ')}</span>
+                              <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>{[...(r.teams || []), r.email, r.phone && (formatPhone(r.phone) || r.phone)].filter(Boolean).join(' · ')}</span>
                             </button>
                           ))}
                           {!results.length && <div style={{ padding: '10px 12px', fontSize: 13, color: 'rgba(0,0,0,.5)' }}>{searching ? 'Searching…' : 'No one matches.'}</div>}
@@ -469,7 +479,7 @@ export default function StaffNew({ initial = {}, tz, settings, cages = [], canBl
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0,1fr))', gap: 4 }}>
                           {[1, 2, 3, 4, 5, 6, 0].map((d) => {
                             const on = days.includes(d);
-                            return <button key={d} aria-pressed={on} onClick={() => setDays((xs) => (on ? xs.filter((x) => x !== d) : [...xs, d]))} style={{ minHeight: 38, borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', border: `1px solid ${on ? '#111' : 'rgba(0,0,0,.18)'}` }}>{DAYS[d]}</button>;
+                            return <button key={d} aria-pressed={on} onClick={() => { daysPicked.current = true; setDays((xs) => (on ? xs.filter((x) => x !== d) : [...xs, d])); }} style={{ minHeight: 38, borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontWeight: 700, background: on ? '#111' : '#fff', color: on ? '#fff' : '#111', border: `1px solid ${on ? '#111' : 'rgba(0,0,0,.18)'}` }}>{DAYS[d]}</button>;
                           })}
                         </div>
                         <label style={fieldLabel}>Repeat through

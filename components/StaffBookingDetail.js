@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatPhone } from '../lib/phone';
 import { supabase } from '../lib/supabaseClient';
 import { STATES } from '../lib/staffStates';
 import { zonedTimeToUtc } from '../lib/facilityTime';
@@ -46,6 +47,9 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
   }
   if (!timeOptions.some((o) => o.hm === mTime)) timeOptions.unshift({ hm: mTime, label: hmLabel(mTime) });
   const [notice, setNotice] = useState(null);
+  const [done, setDone] = useState(false); // canceled/released in this drawer: hide the actions
+  const paidByCard = (g.payments || []).some((p) => p.entry_type === 'charge' && p.method === 'card' && p.status !== 'requires_payment');
+  const paidMethod = ((g.payments || []).find((p) => p.entry_type === 'charge' && p.status !== 'requires_payment') || {}).method;
   const st = STATES[g.payState] || STATES.unpaid;
   const live = LIVE.includes(g.status);
   const footer = live || (g.status === 'completed' && canCollect);
@@ -118,12 +122,15 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
     setWorking(false);
     setConfirming(false);
     if (!r.ok) { setNotice({ error: true, text: body.error || 'Could not cancel this booking.' }); return; }
+    setDone(true);
     setNotice({
       error: !!body.refundError,
       text: body.refundError
         ? 'Canceled, but the Stripe refund failed. Issue it from the Stripe dashboard. The customer was not emailed.'
         : body.refundCents > 0
-          ? `Canceled. ${money(body.refundCents)} refunded to the customer's card, and they've been emailed.`
+          ? paidByCard
+            ? `Canceled. ${money(body.refundCents)} refunded to the customer's card, and they've been emailed.`
+            : `Canceled. Give the customer ${money(body.refundCents)} back in ${paidMethod === 'check' ? 'cash or by check' : 'cash'} at the front desk. They've been emailed.`
           : body.hoursReturned > 0
             ? `Canceled. ${body.hoursReturned} membership hours returned, and the customer has been emailed.`
             : isHold ? 'Hold released. The time is open for booking.'
@@ -179,7 +186,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
               )}
               {g.contactName && g.contactName !== g.name && <div>Contact: {g.contactName}</div>}
               {g.email && <a href={`mailto:${g.email}`} style={{ color: '#111' }}>{g.email}</a>}
-              {g.phone ? <a href={`tel:${g.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{g.phone}</a> : <div style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</div>}
+              {g.phone ? <a href={`tel:${g.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{formatPhone(g.phone) || g.phone}</a> : <div style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</div>}
               {g.guestCount ? <div>{g.guestCount} guests</div> : null}
               {!g.email && <div style={{ color: 'rgba(0,0,0,.45)' }}>Walk-in, no account</div>}
             </div>
@@ -265,7 +272,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
           )}
         </div>
 
-        {footer && (
+        {footer && !done && (
           <div style={{ padding: '16px 24px 22px', borderTop: '1px solid rgba(0,0,0,.08)', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {mode === 'cancel' && (
               <>
