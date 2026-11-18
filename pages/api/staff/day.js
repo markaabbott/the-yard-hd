@@ -16,6 +16,8 @@ function payState(g, charge) {
   if (g.kind === 'donated') return 'donated';
   if (!charge && g.payments.some((x) => x.entry_type === 'comp' && x.status === 'succeeded')) return 'comp';
   if (charge) return charge.is_deposit && charge.balance_due_cents > 0 && !charge.balance_settled_at ? 'balance' : 'paid';
+  // Team weeks are paid by the four-week cycle on the series, not per practice.
+  if (g.kind === 'team' && g.teamPaid) return 'paid';
   if (g.kind === 'membership') return 'member';
   return 'unpaid';
 }
@@ -32,7 +34,7 @@ export default async function handler(req, res) {
     admin.from('facility_settings').select('*').eq('id', 1).single(),
     admin.from('cages').select('id, name, sort_order').eq('active', true).order('sort_order'),
     admin.from('reservations')
-      .select('id, group_id, cage_id, starts_at, ends_at, kind, status, user_id, guest_name, guest_phone, team_name, party_name, contact_name, contact_phone, guest_count, notes, hold_expires_at, canceled_at, created_at, checked_in_at, no_show_at')
+      .select('id, group_id, cage_id, starts_at, ends_at, kind, status, user_id, guest_name, guest_phone, team_name, party_name, contact_name, contact_phone, guest_count, notes, hold_expires_at, canceled_at, created_at, checked_in_at, no_show_at, series_id')
       .in('status', ['pending_payment', 'scheduled', 'confirmed', 'completed', 'canceled', 'no_show'])
       .lt('starts_at', end).gt('ends_at', start).order('starts_at'),
     admin.from('blocks').select('id, cage_id, scope, starts_at, ends_at, reason, created_at, repeat_id, repeat_rule').lt('starts_at', end).gt('ends_at', start),
@@ -68,6 +70,7 @@ export default async function handler(req, res) {
         contactName: x.contact_name, guestCount: x.guest_count, notes: x.notes,
         canceledAt: x.canceled_at, createdAt: x.created_at, holdExpiresAt: x.hold_expires_at,
         userId: x.user_id || null, checkedInAt: x.checked_in_at, noShowAt: x.no_show_at,
+        seriesId: x.series_id || null,
       };
       groups.set(x.group_id, g);
     }
@@ -77,6 +80,14 @@ export default async function handler(req, res) {
     const cn = cageName.get(x.cage_id);
     if (cn && !g.cages.includes(cn)) g.cages.push(cn);
   }
+
+  // Team practice weeks: a week counts as paid when its date falls on or before
+  // the series' paid-through date (each cycle payment covers four practices).
+  const seriesIds = [...new Set(rows.filter((x) => x.kind === 'team' && x.series_id).map((x) => x.series_id))];
+  const sr = seriesIds.length ? await admin.from('reservation_series').select('id, paid_through, next_invoice_on').in('id', seriesIds) : { data: [] };
+  const series = new Map((sr.data || []).map((x) => [x.id, x]));
+  const tz = s.data?.timezone || 'America/Los_Angeles';
+  const localYmd = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 
   const pays = p.data || [];
   for (const g of groups.values()) {
@@ -95,6 +106,11 @@ export default async function handler(req, res) {
     g.openPaymentId = open ? open.id : null;
     g.depositPaymentId = charge?.is_deposit && !charge.balance_settled_at && charge.balance_due_cents > 0 ? charge.id : null;
     g.comp = g.payments.find((x) => x.entry_type === 'comp' && x.status === 'succeeded')?.memo || null;
+    if (g.kind === 'team' && g.seriesId) {
+      const ser = series.get(g.seriesId);
+      g.teamPaidThrough = ser?.paid_through || null;
+      g.teamPaid = !!(ser?.paid_through && localYmd(g.startsAt) <= ser.paid_through);
+    }
     g.payState = payState(g, charge);
   }
 
