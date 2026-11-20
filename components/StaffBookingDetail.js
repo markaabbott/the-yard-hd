@@ -189,6 +189,9 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
               {g.phone ? <a href={`tel:${g.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{formatPhone(g.phone) || g.phone}</a> : <div style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</div>}
               {g.guestCount ? <div>{g.guestCount} guests</div> : null}
               {!g.email && <div style={{ color: 'rgba(0,0,0,.45)' }}>Walk-in, no account</div>}
+              {g.waiver === 'ok' && <div style={{ color: '#14783C', fontWeight: 600 }}>✓ Waiver on file: {g.waiverNames.join(', ')}</div>}
+              {g.waiver === 'missing' && <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 7, background: '#FFF4DE', color: '#8A5A00', fontWeight: 600, lineHeight: 1.45 }}>No waiver on file. Ask them to sign it on app.theyardhd.com before they play.</div>}
+              {g.waiver === 'walkin' && <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 7, background: '#FFF4DE', color: '#8A5A00', fontWeight: 600, lineHeight: 1.45 }}>Walk-in: have every player sign a paper waiver before they play.</div>}
             </div>
           </section>
 

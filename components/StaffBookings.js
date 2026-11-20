@@ -75,6 +75,7 @@ export default function StaffBookings({ groups = [], tz, onOpen, onChanged }) {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 15, fontWeight: 700, color: '#111', textDecoration: noShow ? 'line-through' : 'none' }}>{g.title}</span>
                   <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: st.bg, color: st.fg, border: st.border || 'none' }}>{st.label}</span>
+                  {(g.waiver === 'missing' || g.waiver === 'walkin') && <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', background: '#FFF4DE', color: '#8A5A00' }}>{g.waiver === 'walkin' ? 'Paper waiver' : 'No waiver'}</span>}
                 </span>
                 <span style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>
                   {g.kindLabel} · {g.cages.join(', ')}{g.guestCount ? ` · ${g.guestCount} guests` : ''}{g.title !== g.name ? ` · ${g.name}` : ''}{g.phone ? ` · ${formatPhone(g.phone) || g.phone}` : ''}

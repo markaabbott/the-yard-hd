@@ -163,6 +163,27 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                 {c.memberHours != null && <div style={{ fontSize: 14, padding: '10px 12px', borderRadius: 8, background: '#FBEDEF', display: 'flex', justifyContent: 'space-between' }}><span>Membership hours left</span><strong>{c.memberHours} hr · until {new Date(c.memberExpires).toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric' })}</strong></div>}
               </div>
             )}
+            {!walk && Array.isArray(c.waivers) && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'rgba(0,0,0,.5)', marginBottom: 8 }}>Liability waiver</div>
+                {c.waivers.length === 0
+                  ? <div style={{ fontSize: 13.5, padding: '10px 12px', borderRadius: 8, background: '#FFF4DE', color: '#8A5A00' }}>Not signed yet. They sign it on app.theyardhd.com before their first booking.</div>
+                  : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {c.waivers.map((x) => (
+                        <div key={x.participant_name} style={{ fontSize: 13, padding: '9px 12px', borderRadius: 8, background: x.current ? '#E8F0EA' : '#FFF4DE', lineHeight: 1.5 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                            <strong>{x.participant_name}{x.is_minor ? ' (minor)' : ''}</strong>
+                            <span style={{ fontWeight: 700, color: x.current ? '#14783C' : '#8A5A00' }}>{x.current ? 'Current' : 'Needs re-signing'}</span>
+                          </div>
+                          <div style={{ color: 'rgba(0,0,0,.6)' }}>
+                            Signed by {x.signature_name}{x.guardian_relationship ? ` (${x.guardian_relationship})` : ''} on {new Date(x.signed_at).toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' })}
+                            {x.expires_at ? ` · expires ${new Date(x.expires_at).toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>}
+              </div>
+            )}
 
             <button onClick={() => onBook(walk ? { type: 'walkin', name: c.name, phone: c.phone } : { id: c.id, name: c.name, email: c.email, phone: c.phone, memberHours: c.memberHours, memberExpires: c.memberExpires })}
               style={{ minHeight: 44, borderRadius: 6, border: 'none', background: RED, color: '#fff', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer' }}>
