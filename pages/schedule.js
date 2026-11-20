@@ -10,6 +10,9 @@ import MembershipSection from '../components/MembershipSection';
 import MyTeams from '../components/MyTeams';
 import WaiverPanel from '../components/WaiverPanel';
 import { WAIVER_VERSION } from '../lib/waiverText';
+import { PENDING_JOIN_KEY } from '../lib/joinLink';
+import CoachTeams from '../components/CoachTeams';
+import { downloadWaiverPdf } from '../lib/downloadWaiver';
 import { localParts } from '../lib/facilityTime';
 
 const MODES = [
@@ -102,6 +105,14 @@ export default function Schedule() {
     if (!loading && !user) router.replace('/signin');
   }, [loading, user, router]);
 
+  // Came in through a coach's team link and had to sign in first: go back to it.
+  useEffect(() => {
+    if (!user) return;
+    let t = null;
+    try { t = localStorage.getItem(PENDING_JOIN_KEY); if (t) localStorage.removeItem(PENDING_JOIN_KEY); } catch (e) { /* storage blocked */ }
+    if (t && /^[A-Za-z0-9_-]{10,64}$/.test(t)) router.replace(`/join/${t}`);
+  }, [user, router]);
+
   useEffect(() => {
     if (!user) return;
     supabase.from('users').select('needs_name').eq('id', user.id).single()
@@ -123,7 +134,7 @@ export default function Schedule() {
   // player; the newest per player name wins.
   const loadWaivers = useCallback(() => {
     if (!user) return;
-    supabase.from('waivers').select('participant_name, is_minor, signed_at, expires_at')
+    supabase.from('waivers').select('id, participant_name, is_minor, signed_at, expires_at')
       .eq('user_id', user.id).eq('waiver_version', WAIVER_VERSION).gt('expires_at', new Date().toISOString())
       .order('signed_at', { ascending: false })
       .then(({ data }) => {
@@ -264,7 +275,10 @@ export default function Schedule() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '11px 14px', marginBottom: 18, borderRadius: 9, background: waivers.length ? '#fff' : '#FFF4DE', border: '1px solid rgba(0,0,0,.08)', fontSize: 13.5 }}>
           <span style={{ lineHeight: 1.5 }}>
             {waivers.length
-              ? <><strong>Waiver on file</strong> for {waivers.map((w) => w.participant_name).join(', ')} · good through {new Date(Math.min(...waivers.map((w) => new Date(w.expires_at).getTime()))).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</>
+              ? <><strong>Waiver on file</strong> for {waivers.map((w, i) => (
+                  <span key={w.id}>{i ? ', ' : ''}<button onClick={() => downloadWaiverPdf(w.id, w.participant_name).catch((e) => alert(e.message))} title={`Download ${w.participant_name}'s signed waiver (PDF)`}
+                    style={{ border: 'none', background: 'none', padding: 0, font: 'inherit', color: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>{w.participant_name}</button></span>
+                ))} · good through {new Date(Math.min(...waivers.map((w) => new Date(w.expires_at).getTime()))).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}<span style={{ display: 'block', fontSize: 12, color: 'rgba(0,0,0,.5)' }}>Tap a name to download the signed copy (PDF).</span></>
               : <><strong>Liability waiver needed.</strong> Sign once for your players before your first booking.</>}
           </span>
           <button onClick={() => setAddPlayers(true)} style={{ border: 'none', background: 'none', padding: 0, color: '#BA0C2F', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
@@ -272,6 +286,8 @@ export default function Schedule() {
           </button>
         </div>
       )}
+
+      {waivers && <CoachTeams />}
 
       <div role="tablist" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
         {MODES.map((m) => {
