@@ -1,13 +1,15 @@
 // Vercel serverless function — POST /api/sign-waiver
 // Auth: Authorization: Bearer <supabase access token>
 // Body: { version, signatureName, agreeRead: true, agreeSue: true,
-//         participants: [{ name, dob: 'YYYY-MM-DD', relationship: 'self' | 'parent' | 'guardian' }] }
+//         participants: [{ name, dob: 'YYYY-MM-DD', relationship: 'self' | 'parent' | 'guardian' }],
+//         teamToken? }  (signed through a coach's team link: the players are added to that team)
 //
 // Writes one waivers row per participant, stamped with the signer's typed
 // name, the waiver version, IP address, device, and a one-year expiry.
 // Waivers are append-only: re-signing adds new rows, nothing is edited.
 import { supabaseAdmin as admin } from '../../lib/supabaseAdmin';
 import { WAIVER_VERSION, WAIVER_YEARS } from '../../lib/waiverText';
+import { teamByToken, addPlayers } from '../../lib/waiverServer';
 
 const REL = ['self', 'parent', 'guardian'];
 
@@ -27,7 +29,9 @@ export default async function handler(req, res) {
   const uid = authData?.user?.id;
   if (authErr || !uid) return res.status(401).json({ error: 'not signed in' });
 
-  const { version, signatureName, agreeRead, agreeSue, participants } = req.body || {};
+  const { version, signatureName, agreeRead, agreeSue, participants, teamToken } = req.body || {};
+  const team = teamToken ? await teamByToken(teamToken) : null;
+  if (teamToken && !team) return res.status(404).json({ error: 'This team link is no longer active. Ask your coach for a new one.' });
 
   const { data: fs } = await admin.from('facility_settings').select('waiver_version').eq('id', 1).single();
   if (version !== WAIVER_VERSION || fs?.waiver_version !== WAIVER_VERSION) {
@@ -78,5 +82,9 @@ export default async function handler(req, res) {
 
   const { data, error } = await admin.from('waivers').insert(rows).select('id, participant_name, is_minor, signed_at, expires_at');
   if (error) return res.status(500).json({ error: error.message });
-  res.status(200).json({ signed: data });
+  if (team) {
+    try { await addPlayers(team.id, uid, rows.map((r) => r.participant_name)); }
+    catch (e) { return res.status(500).json({ error: `Waiver saved, but adding to the team failed: ${e.message}` }); }
+  }
+  res.status(200).json({ signed: data, team: team ? team.name : null });
 }
