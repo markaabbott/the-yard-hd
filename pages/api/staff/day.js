@@ -47,12 +47,22 @@ export default async function handler(req, res) {
   const userIds = [...new Set(rows.map((x) => x.user_id).filter(Boolean))];
   const groupIds = [...new Set(rows.map((x) => x.group_id))];
 
-  const [u, p] = await Promise.all([
+  const [u, p, wv] = await Promise.all([
     userIds.length ? admin.from('users').select('id, first_name, last_name, email, phone').in('id', userIds) : { data: [] },
     groupIds.length ? admin.from('payments')
       .select('id, reservation_group_id, entry_type, amount_cents, method, status, processing_fee_cents, is_deposit, balance_due_cents, balance_settled_at, stripe_payment_intent_id, stripe_refund_id, memo, created_at')
       .in('reservation_group_id', groupIds).order('created_at') : { data: [] },
+    // Customers with a current, unexpired liability waiver (and who it covers).
+    userIds.length ? admin.from('waivers').select('user_id, participant_name')
+      .in('user_id', userIds).eq('waiver_version', s.data?.waiver_version || '')
+      .gt('expires_at', new Date().toISOString()) : { data: [] },
   ]);
+  const waived = new Map();
+  for (const w of wv.data || []) {
+    const list = waived.get(w.user_id) || [];
+    if (!list.includes(w.participant_name)) list.push(w.participant_name);
+    waived.set(w.user_id, list);
+  }
   const users = new Map((u.data || []).map((x) => [x.id, x]));
   const cageName = new Map((c.data || []).map((x) => [x.id, x.name]));
 
@@ -71,6 +81,10 @@ export default async function handler(req, res) {
         canceledAt: x.canceled_at, createdAt: x.created_at, holdExpiresAt: x.hold_expires_at,
         userId: x.user_id || null, checkedInAt: x.checked_in_at, noShowAt: x.no_show_at,
         seriesId: x.series_id || null,
+        // 'ok' | 'missing' | 'walkin' (no account to sign from) | null (not needed)
+        waiver: !['drop_in', 'membership', 'party', 'team'].includes(x.kind) ? null
+          : !x.user_id ? 'walkin' : waived.has(x.user_id) ? 'ok' : 'missing',
+        waiverNames: x.user_id ? waived.get(x.user_id) || [] : [],
       };
       groups.set(x.group_id, g);
     }

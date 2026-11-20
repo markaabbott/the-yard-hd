@@ -101,11 +101,14 @@ async function history(rows) {
 }
 
 async function accountProfile(id) {
-  const [u, r, n] = await Promise.all([
+  const [u, r, n, w, fs] = await Promise.all([
     admin.from('users').select(`${COLS}, created_at`).eq('id', id).maybeSingle(),
     admin.from('reservations').select(RCOLS).eq('user_id', id).neq('kind', 'staff_hold')
       .order('starts_at', { ascending: false }).limit(600),
     admin.from('customer_notes').select('notes, updated_at, updated_by').eq('user_id', id).maybeSingle(),
+    admin.from('waivers').select('participant_name, participant_dob, is_minor, guardian_relationship, signature_name, waiver_version, signed_at, expires_at')
+      .eq('user_id', id).order('signed_at', { ascending: false }).limit(100),
+    admin.from('facility_settings').select('waiver_version').eq('id', 1).single(),
   ]);
   if (u.error) throw u.error;
   if (!u.data) return null;
@@ -119,6 +122,16 @@ async function accountProfile(id) {
     ...c, ...(await history(r.data || [])),
     firstName: u.data.first_name, lastName: u.data.last_name, createdAt: u.data.created_at,
     notes: n.data?.notes || '', notesUpdatedAt: n.data?.updated_at || null, notesBy,
+    // Newest signature per player, marked current (this version, not expired) or not.
+    waivers: (() => {
+      const seen = new Map(), now = Date.now();
+      for (const x of w.data || []) {
+        const k = x.participant_name.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.set(k, { ...x, current: x.waiver_version === fs.data?.waiver_version && (!x.expires_at || new Date(x.expires_at).getTime() > now) });
+      }
+      return [...seen.values()];
+    })(),
   };
 }
 
