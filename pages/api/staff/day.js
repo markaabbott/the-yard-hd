@@ -4,6 +4,7 @@
 // (after a staff check) so coaches see paid status without ledger RLS access.
 import { supabaseAdmin as admin } from '../../../lib/supabaseAdmin';
 import { requireStaff } from '../../../lib/staffAuth';
+import { latestWaivers, teamsWithPlayers } from '../../../lib/waiverServer';
 
 const KIND = { drop_in: 'Drop-in', membership: 'Membership', team: 'Team', party: 'Party', clinic: 'Clinic', staff_hold: 'Staff hold', donated: 'Donated' };
 
@@ -52,16 +53,17 @@ export default async function handler(req, res) {
     groupIds.length ? admin.from('payments')
       .select('id, reservation_group_id, entry_type, amount_cents, method, status, processing_fee_cents, is_deposit, balance_due_cents, balance_settled_at, stripe_payment_intent_id, stripe_refund_id, memo, created_at')
       .in('reservation_group_id', groupIds).order('created_at') : { data: [] },
-    // Customers with a current, unexpired liability waiver (and who it covers).
-    userIds.length ? admin.from('waivers').select('user_id, participant_name')
-      .in('user_id', userIds).eq('waiver_version', s.data?.waiver_version || '')
-      .gt('expires_at', new Date().toISOString()) : { data: [] },
+    // Each customer's latest waiver per player, and the team lists they run.
+    latestWaivers(userIds),
   ]);
-  const waived = new Map();
-  for (const w of wv.data || []) {
-    const list = waived.get(w.user_id) || [];
-    if (!list.includes(w.participant_name)) list.push(w.participant_name);
-    waived.set(w.user_id, list);
+  const teamLists = await teamsWithPlayers(userIds);
+  const waived = new Map();   // user -> names with a current waiver
+  const waiverList = new Map(); // user -> [{ id, name, current, isMinor }]
+  for (const w of wv.values()) {
+    const all = waiverList.get(w.user_id) || [];
+    all.push({ id: w.id, name: w.participant_name, current: w.current, isMinor: w.is_minor, signedBy: w.signature_name, expiresAt: w.expires_at });
+    waiverList.set(w.user_id, all);
+    if (w.current) waived.set(w.user_id, [...(waived.get(w.user_id) || []), w.participant_name]);
   }
   const users = new Map((u.data || []).map((x) => [x.id, x]));
   const cageName = new Map((c.data || []).map((x) => [x.id, x.name]));
@@ -85,6 +87,8 @@ export default async function handler(req, res) {
         waiver: !['drop_in', 'membership', 'party', 'team'].includes(x.kind) ? null
           : !x.user_id ? 'walkin' : waived.has(x.user_id) ? 'ok' : 'missing',
         waiverNames: x.user_id ? waived.get(x.user_id) || [] : [],
+        waivers: x.user_id ? waiverList.get(x.user_id) || [] : [],
+        teamLists: x.user_id ? teamLists.filter((t) => t.ownerId === x.user_id) : [],
       };
       groups.set(x.group_id, g);
     }

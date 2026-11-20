@@ -7,6 +7,7 @@
 //   with that email (magic link / Google / Apple) and the booking is already theirs.
 import { supabaseAdmin as admin } from '../../../lib/supabaseAdmin';
 import { requireStaff } from '../../../lib/staffAuth';
+import { teamsWithPlayers } from '../../../lib/waiverServer';
 import { formatPhone, PHONE_ERROR } from '../../../lib/phone';
 
 const COLS = 'id, first_name, last_name, email, phone, needs_name';
@@ -106,7 +107,7 @@ async function accountProfile(id) {
     admin.from('reservations').select(RCOLS).eq('user_id', id).neq('kind', 'staff_hold')
       .order('starts_at', { ascending: false }).limit(600),
     admin.from('customer_notes').select('notes, updated_at, updated_by').eq('user_id', id).maybeSingle(),
-    admin.from('waivers').select('participant_name, participant_dob, is_minor, guardian_relationship, signature_name, waiver_version, signed_at, expires_at')
+    admin.from('waivers').select('id, participant_name, participant_dob, is_minor, guardian_relationship, signature_name, waiver_version, signed_at, expires_at')
       .eq('user_id', id).order('signed_at', { ascending: false }).limit(100),
     admin.from('facility_settings').select('waiver_version').eq('id', 1).single(),
   ]);
@@ -122,6 +123,7 @@ async function accountProfile(id) {
     ...c, ...(await history(r.data || [])),
     firstName: u.data.first_name, lastName: u.data.last_name, createdAt: u.data.created_at,
     notes: n.data?.notes || '', notesUpdatedAt: n.data?.updated_at || null, notesBy,
+    teamLists: await teamsWithPlayers([id]),
     // Newest signature per player, marked current (this version, not expired) or not.
     waivers: (() => {
       const seen = new Map(), now = Date.now();
