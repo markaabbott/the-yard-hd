@@ -8,6 +8,8 @@ import MyBookings from '../components/MyBookings';
 import TeamPanel from '../components/TeamPanel';
 import MembershipSection from '../components/MembershipSection';
 import MyTeams from '../components/MyTeams';
+import WaiverPanel from '../components/WaiverPanel';
+import { WAIVER_VERSION } from '../lib/waiverText';
 import { localParts } from '../lib/facilityTime';
 
 const MODES = [
@@ -91,6 +93,8 @@ export default function Schedule() {
   const [mode, setMode] = useState('drop');
   const [member, setMember] = useState(false);
   const [teamsKey, setTeamsKey] = useState(0);
+  const [waivers, setWaivers] = useState(null); // current, unexpired signatures (null = loading)
+  const [addPlayers, setAddPlayers] = useState(false);
 
   const tz = settings?.timezone || FALLBACK_TZ;
 
@@ -114,6 +118,23 @@ export default function Schedule() {
       .then(({ data }) => setMember(!!data));
   }, [user]);
   useEffect(() => { loadMember(); }, [loadMember]);
+
+  // Liability waiver on file? One current-version, unexpired signature per
+  // player; the newest per player name wins.
+  const loadWaivers = useCallback(() => {
+    if (!user) return;
+    supabase.from('waivers').select('participant_name, is_minor, signed_at, expires_at')
+      .eq('user_id', user.id).eq('waiver_version', WAIVER_VERSION).gt('expires_at', new Date().toISOString())
+      .order('signed_at', { ascending: false })
+      .then(({ data }) => {
+        const seen = new Map();
+        for (const w of data || []) { const k = w.participant_name.toLowerCase(); if (!seen.has(k)) seen.set(k, w); }
+        setWaivers([...seen.values()]);
+      });
+  }, [user]);
+  useEffect(() => { loadWaivers(); }, [loadWaivers]);
+  // Staff book for themselves without the prompt (the database doesn't require it of them either).
+  const waiverOk = isStaff || (waivers && waivers.length > 0);
 
   const dayStart = useMemo(() => zonedTimeToUtc(dayYmd, 0, 0, tz), [dayYmd, tz]);
   const dayEnd = useMemo(() => zonedTimeToUtc(addDaysYmd(dayYmd, 1), 0, 0, tz), [dayYmd, tz]);
@@ -239,6 +260,19 @@ export default function Schedule() {
       {settings && <MyBookings key={bookingsKey} userId={user.id} settings={settings} tz={tz} onChange={load} />}
       <MyTeams userId={user.id} tz={tz} refreshKey={teamsKey} />
 
+      {waivers && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '11px 14px', marginBottom: 18, borderRadius: 9, background: waivers.length ? '#fff' : '#FFF4DE', border: '1px solid rgba(0,0,0,.08)', fontSize: 13.5 }}>
+          <span style={{ lineHeight: 1.5 }}>
+            {waivers.length
+              ? <><strong>Waiver on file</strong> for {waivers.map((w) => w.participant_name).join(', ')} · good through {new Date(Math.min(...waivers.map((w) => new Date(w.expires_at).getTime()))).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</>
+              : <><strong>Liability waiver needed.</strong> Sign once for your players before your first booking.</>}
+          </span>
+          <button onClick={() => setAddPlayers(true)} style={{ border: 'none', background: 'none', padding: 0, color: '#BA0C2F', fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}>
+            {waivers.length ? '+ Add a player' : 'Sign the waiver'}
+          </button>
+        </div>
+      )}
+
       <div role="tablist" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginBottom: 18 }}>
         {MODES.map((m) => {
           const on = mode === m.k;
@@ -344,7 +378,16 @@ export default function Schedule() {
 
       {needsName && <NamePrompt onDone={() => setNeedsName(false)} />}
 
-      {selected && selected.kind === 'team' && (() => {
+      {(addPlayers || (selected && waivers && !waiverOk)) && (
+        <WaiverPanel
+          userId={user.id}
+          reason={addPlayers && waivers?.length ? 'Add players who aren\u2019t on your waiver yet. Good for one year.' : 'Sign once before your first booking. Good for one year.'}
+          onSigned={() => { setAddPlayers(false); loadWaivers(); }}
+          onClose={() => { if (addPlayers) setAddPlayers(false); else setSelected(null); }}
+        />
+      )}
+
+      {selected && waiverOk && !addPlayers && selected.kind === 'team' && (() => {
         const lp = localParts(selected.startsAt, tz);
         return (
           <TeamPanel
@@ -355,7 +398,7 @@ export default function Schedule() {
         );
       })()}
 
-      {selected && selected.kind !== 'team' && (
+      {selected && waiverOk && !addPlayers && selected.kind !== 'team' && (
         <BookingPanel
           kind={selected.kind}
           cages={selected.cages}
