@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { searchCustomers, getCustomer, updateCustomer } from '../lib/staffApi';
 import PhoneField from './PhoneField';
 import { formatPhone, isPhoneOk } from '../lib/phone';
+import { downloadWaiverPdf } from '../lib/downloadWaiver';
 
 const RED = '#BA0C2F';
 const money = (c) => `$${(Math.abs(c) / 100).toFixed(2)}`;
@@ -173,7 +174,10 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                         <div key={x.participant_name} style={{ fontSize: 13, padding: '9px 12px', borderRadius: 8, background: x.current ? '#E8F0EA' : '#FFF4DE', lineHeight: 1.5 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                             <strong>{x.participant_name}{x.is_minor ? ' (minor)' : ''}</strong>
-                            <span style={{ fontWeight: 700, color: x.current ? '#14783C' : '#8A5A00' }}>{x.current ? 'Current' : 'Needs re-signing'}</span>
+                            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <span style={{ fontWeight: 700, color: x.current ? '#14783C' : '#8A5A00' }}>{x.current ? 'Current' : 'Needs re-signing'}</span>
+                              <button onClick={() => downloadWaiverPdf(x.id, x.participant_name).catch((e) => console.error(e))} style={{ border: '1px solid rgba(0,0,0,.15)', background: '#fff', borderRadius: 6, padding: '3px 8px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>PDF</button>
+                            </span>
                           </div>
                           <div style={{ color: 'rgba(0,0,0,.6)' }}>
                             Signed by {x.signature_name}{x.guardian_relationship ? ` (${x.guardian_relationship})` : ''} on {new Date(x.signed_at).toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric', year: 'numeric' })}
@@ -182,6 +186,20 @@ export default function StaffCustomer({ initialId = null, tz, canEdit = true, on
                         </div>
                       ))}
                     </div>}
+                {(c.teamLists || []).map((t) => (
+                  <details key={t.id} style={{ marginTop: 8, border: '1px solid rgba(0,0,0,.1)', borderRadius: 8, padding: '8px 10px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>Team list: {t.name} · {t.currentCount} of {t.players.length} current</summary>
+                    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {t.players.length === 0 && <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>No players have signed through this team's link yet.</div>}
+                      {t.players.map((pl) => (
+                        <div key={pl.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                          <span><strong>{pl.name}</strong> <span style={{ fontWeight: 700, fontSize: 12, color: pl.status === 'current' ? '#14783C' : '#8A5A00' }}>{pl.status === 'current' ? 'Current' : pl.status === 'expired' ? 'Needs re-signing' : 'No waiver'}</span>{pl.signedBy ? <span style={{ color: 'rgba(0,0,0,.55)', fontSize: 12 }}> · {pl.signedBy}</span> : null}</span>
+                          {pl.waiverId && <button onClick={() => downloadWaiverPdf(pl.waiverId, pl.name).catch((e) => console.error(e))} style={{ border: '1px solid rgba(0,0,0,.15)', background: '#fff', borderRadius: 6, padding: '3px 8px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', flex: 'none' }}>PDF</button>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ))}
               </div>
             )}
 

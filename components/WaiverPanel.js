@@ -11,7 +11,7 @@ const blank = () => ({ name: '', dob: '', relationship: '' });
 // The liability waiver: read it, list the players, check two boxes, type a
 // name. Shown before a customer's first booking (and again when it expires or
 // the wording changes), and from "Add a player" on the schedule page.
-export default function WaiverPanel({ userId, reason, onSigned, onClose }) {
+export default function WaiverPanel({ userId, reason, teamToken, onSigned, onClose }) {
   const [people, setPeople] = useState([blank()]);
   const [agreeRead, setAgreeRead] = useState(false);
   const [agreeSue, setAgreeSue] = useState(false);
@@ -44,11 +44,11 @@ export default function WaiverPanel({ userId, reason, onSigned, onClose }) {
     try {
       const r = await authFetch('/api/sign-waiver', {
         method: 'POST',
-        body: JSON.stringify({ version: WAIVER_VERSION, signatureName: signature, agreeRead, agreeSue, participants: people }),
+        body: JSON.stringify({ version: WAIVER_VERSION, signatureName: signature, agreeRead, agreeSue, participants: people, ...(teamToken ? { teamToken } : {}) }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(body.error || 'Could not save the waiver. Try again.'); setWorking(false); return; }
-      onSigned?.(body.signed || []);
+      onSigned?.(body.signed || [], body.team || null);
     } catch (e) {
       setErr('Could not save the waiver. Check your connection and try again.');
       setWorking(false);

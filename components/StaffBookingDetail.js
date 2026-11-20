@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { formatPhone } from '../lib/phone';
+import { downloadWaiverPdf } from '../lib/downloadWaiver';
 import { supabase } from '../lib/supabaseClient';
 import { STATES } from '../lib/staffStates';
 import { zonedTimeToUtc } from '../lib/facilityTime';
@@ -176,6 +177,7 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
               </div>
             </div>
           </section>
+
           ) : (<>
           <section>
             <div style={label}>Customer</div>
@@ -189,11 +191,28 @@ export default function StaffBookingDetail({ group: g, tz, settings, cages = [],
               {g.phone ? <a href={`tel:${g.phone.replace(/\D/g, '')}`} style={{ color: '#111' }}>{formatPhone(g.phone) || g.phone}</a> : <div style={{ color: 'rgba(0,0,0,.45)' }}>No phone on file</div>}
               {g.guestCount ? <div>{g.guestCount} guests</div> : null}
               {!g.email && <div style={{ color: 'rgba(0,0,0,.45)' }}>Walk-in, no account</div>}
-              {g.waiver === 'ok' && <div style={{ color: '#14783C', fontWeight: 600 }}>✓ Waiver on file: {g.waiverNames.join(', ')}</div>}
               {g.waiver === 'missing' && <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 7, background: '#FFF4DE', color: '#8A5A00', fontWeight: 600, lineHeight: 1.45 }}>No waiver on file. Ask them to sign it on app.theyardhd.com before they play.</div>}
               {g.waiver === 'walkin' && <div style={{ marginTop: 4, padding: '8px 10px', borderRadius: 7, background: '#FFF4DE', color: '#8A5A00', fontWeight: 600, lineHeight: 1.45 }}>Walk-in: have every player sign a paper waiver before they play.</div>}
             </div>
           </section>
+
+          {g.waiver && g.waiver !== 'walkin' && ((g.waivers || []).length > 0 || (g.teamLists || []).length > 0) && (
+            <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={label}>Waivers</div>
+              {(g.waivers || []).map((w) => <WaiverRow key={w.id} name={w.name} status={w.current ? 'current' : 'expired'} sub={`Signed by ${w.signedBy}${w.expiresAt ? ` · expires ${new Date(w.expiresAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}`} id={w.id} />)}
+              {(g.teamLists || []).map((t) => (
+                <details key={t.id} style={{ border: '1px solid rgba(0,0,0,.1)', borderRadius: 8, padding: '8px 10px' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 13.5, fontWeight: 700 }}>
+                    Team list: {t.name} · {t.currentCount} of {t.players.length} current
+                  </summary>
+                  <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {t.players.length === 0 && <div style={{ fontSize: 12.5, color: 'rgba(0,0,0,.55)' }}>No players have signed through this team's link yet.</div>}
+                    {t.players.map((p) => <WaiverRow key={p.id} name={p.name} status={p.status} sub={p.signedBy ? `Signed by ${p.signedBy}` : null} id={p.waiverId} />)}
+                  </div>
+                </details>
+              ))}
+            </section>
+          )}
 
           <section>
             <div style={label}>Payment</div>
@@ -392,3 +411,19 @@ const linkBtn = { border: 'none', background: 'none', padding: '6px 2px', cursor
 const primaryBtn = { minHeight: 44, borderRadius: 6, border: 'none', background: RED, color: '#fff', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase' };
 const fieldLabel = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, fontWeight: 600, color: 'rgba(0,0,0,.6)' };
 const field = { minHeight: 42, padding: '0 10px', border: '1px solid rgba(0,0,0,.2)', borderRadius: 6, fontSize: 14, background: '#fff', color: '#111', fontWeight: 400 };
+
+const WAIVER_ST = { current: ['Current', '#14783C'], expired: ['Needs re-signing', '#8A5A00'], missing: ['No waiver', '#8A5A00'] };
+function WaiverRow({ name, status, sub, id }) {
+  const [t, color] = WAIVER_ST[status] || WAIVER_ST.missing;
+  const [busy, setBusy] = useState(false);
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 13 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <span><strong>{name}</strong> <span style={{ color, fontWeight: 700, fontSize: 12 }}>{t}</span></span>
+        {sub && <span style={{ fontSize: 12, color: 'rgba(0,0,0,.55)' }}>{sub}</span>}
+      </div>
+      {id && <button disabled={busy} onClick={async () => { setBusy(true); try { await downloadWaiverPdf(id, name); } catch (e) { console.error(e); } setBusy(false); }}
+        style={{ border: '1px solid rgba(0,0,0,.15)', background: '#fff', borderRadius: 6, padding: '5px 9px', fontSize: 12, fontWeight: 700, cursor: busy ? 'default' : 'pointer', flex: 'none' }}>{busy ? '…' : 'PDF'}</button>}
+    </div>
+  );
+}
