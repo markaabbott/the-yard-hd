@@ -12,6 +12,7 @@ import WaiverPanel from '../components/WaiverPanel';
 import { WAIVER_VERSION } from '../lib/waiverText';
 import { PENDING_JOIN_KEY } from '../lib/joinLink';
 import CoachTeams from '../components/CoachTeams';
+import SignedInAs from '../components/SignedInAs';
 import { downloadWaiverPdf } from '../lib/downloadWaiver';
 import { localParts } from '../lib/facilityTime';
 
@@ -256,7 +257,8 @@ export default function Schedule() {
         <div style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 26, textTransform: 'uppercase', letterSpacing: '.03em' }}>
           Book a session
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+          <SignedInAs user={user} />
           {isStaff && (
             <a href="/staff" style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 13, letterSpacing: '.1em', textTransform: 'uppercase', background: '#000', color: '#fff', padding: '7px 14px', borderRadius: 5, textDecoration: 'none' }}>
               Staff schedule

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '../lib/AuthContext';
+import SignedInAs from '../components/SignedInAs';
 import { supabase } from '../lib/supabaseClient';
 import { zonedTimeToUtc, todayYmd, addDaysYmd, labelYmd } from '../lib/facilityTime';
 import { STATES, LEGEND } from '../lib/staffStates';
@@ -156,7 +157,8 @@ export default function Staff() {
             </span>
           )}
         </div>
-        <nav style={{ display: 'flex', alignItems: 'center', gap: 18, fontSize: 13 }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: 18, fontSize: 13, flexWrap: 'wrap', minWidth: 0 }}>
+          <SignedInAs user={user} />
           <button onClick={() => setAlertsOpen(true)} style={{ border: 'none', background: 'none', padding: 0, color: 'rgba(0,0,0,.6)', cursor: 'pointer', fontSize: 13 }}>Email alerts</button>
           <Link href="/schedule" style={{ color: 'rgba(0,0,0,.6)' }}>Customer booking</Link>
           <button onClick={() => signOut()} style={{ border: 'none', background: 'none', padding: 0, color: 'rgba(0,0,0,.6)', cursor: 'pointer', fontSize: 13 }}>Sign out</button>
