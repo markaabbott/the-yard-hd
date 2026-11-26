@@ -25,12 +25,6 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: `payment is already ${payment.status}` });
   }
 
-  let email = null;
-  if (payment.user_id) {
-    const { data: u } = await supabase.from('users').select('email').eq('id', payment.user_id).single();
-    email = u?.email || null;
-  }
-
   try {
   // Reuse the existing intent on a page refresh instead of creating a duplicate.
   if (payment.stripe_payment_intent_id) {
@@ -43,7 +37,8 @@ export default async function handler(req, res) {
   const intent = await stripe.paymentIntents.create({
     amount: payment.amount_cents,
     currency: 'usd',
-    receipt_email: email || undefined,
+    // No receipt_email: the app sends its own confirmation and cancellation
+    // emails, so customers get one receipt, not a second one from Stripe.
     statement_descriptor_suffix: 'THE YARD HD'.slice(0, 22),
     metadata: { payment_id: payment.id },
     automatic_payment_methods: { enabled: true }
