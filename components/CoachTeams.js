@@ -16,7 +16,7 @@ const needsAttention = (p) => statusOf(p) !== 'current';
 
 // "Team waivers": a coach's team lists. Each team is a collapsed card (name,
 // count, Copy link); open it to see players, problems first.
-export default function CoachTeams() {
+export default function CoachTeams({ embedded = false, onSummary } = {}) {
   const [teams, setTeams] = useState(null);
   const [open, setOpen] = useState(false);
   const [openTeam, setOpenTeam] = useState(null);
@@ -66,12 +66,14 @@ export default function CoachTeams() {
     catch (e) { window.prompt('Copy this link:', url); }
   }
 
+  const attentionTotal = (teams || []).reduce((a, t) => a + t.players.filter(needsAttention).length, 0);
+  useEffect(() => { if (teams) onSummary?.({ teams: teams.length, attention: attentionTotal }); }, [teams, attentionTotal, onSummary]);
   if (!teams) return null;
-  const attentionTotal = teams.reduce((a, t) => a + t.players.filter(needsAttention).length, 0);
+  const isOpen = embedded || open;
 
   return (
-    <section style={{ marginBottom: 18, border: '1px solid rgba(0,0,0,.08)', borderRadius: 10, background: '#fff' }}>
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
+    <section style={embedded ? {} : { marginBottom: 18, border: '1px solid rgba(0,0,0,.08)', borderRadius: 10, background: '#fff' }}>
+      {!embedded && <button onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 14px', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
         <span>
           <span style={{ fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 15, letterSpacing: '.08em', textTransform: 'uppercase' }}>Team waivers</span>
           <span style={{ display: 'block', fontSize: 12.5, color: 'rgba(0,0,0,.55)', marginTop: 2 }}>
@@ -81,10 +83,10 @@ export default function CoachTeams() {
           </span>
         </span>
         <Chevron open={open} />
-      </button>
+      </button>}
 
-      {open && (
-        <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {isOpen && (
+        <div style={{ padding: embedded ? 0 : '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {(!teams.length || howOpen) && (
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'rgba(0,0,0,.65)' }}>
               As the coach, you're responsible for making sure every player has a signed waiver before they play. Send your team's link to each family. When a parent signs through it, their player shows up on your list. Remove players who leave the team.
