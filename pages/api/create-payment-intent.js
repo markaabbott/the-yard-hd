@@ -31,6 +31,7 @@ export default async function handler(req, res) {
     email = u?.email || null;
   }
 
+  try {
   // Reuse the existing intent on a page refresh instead of creating a duplicate.
   if (payment.stripe_payment_intent_id) {
     const existing = await stripe.paymentIntents.retrieve(payment.stripe_payment_intent_id);
@@ -55,4 +56,9 @@ export default async function handler(req, res) {
   if (attachErr) return res.status(500).json({ error: attachErr.message });
 
   res.status(200).json({ clientSecret: intent.client_secret });
+  } catch (e) {
+    // Log the real Stripe error for Vercel's logs; show the customer something plain.
+    console.error('[create-payment-intent] stripe error', e?.type, e?.code, e?.message);
+    res.status(502).json({ error: 'The card form could not load. Please try again in a minute, or call The Yard at (760) 553-5996.', code: e?.code || e?.type || null });
+  }
 }
