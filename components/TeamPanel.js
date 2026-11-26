@@ -7,7 +7,7 @@ const money = (c) => `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`;
 const LEAGUES = [{ k: 'rec', t: 'Rec' }, { k: 'school', t: 'School' }, { k: 'travel', t: 'Travel' }];
 
 // Weekly team practice: the whole facility, same day and time every week.
-// Billed in 4-week cycles (always four practices), held three months out.
+// Billed in 4-week cycles (always four practices), held two months out (series_horizon_months).
 export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, onBooked }) {
   const weeks = settings?.series_cycle_weeks ?? 4;
   const rate = (h) => (h === 1 ? settings?.team_1hr_rate_cents ?? 14000 : settings?.team_2hr_rate_cents ?? 12000);
@@ -44,6 +44,8 @@ export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, on
     return () => { window.removeEventListener('pagehide', bail); bail(); };
   }, []);
 
+  const hzm = settings?.series_horizon_months ?? 2;
+  const horizon = `${['zero','one','two','three','four','five','six'][hzm] || hzm} month${hzm === 1 ? '' : 's'}`;
   const fmtDate = (d) => d.toLocaleDateString(undefined, { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
   const fmtTime = (d) => d.toLocaleTimeString([], { timeZone: tz, hour: 'numeric', minute: '2-digit' });
   const dates = Array.from({ length: weeks }, (_, i) => new Date(startsAt.getTime() + i * 7 * 86400000));
@@ -106,7 +108,7 @@ export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, on
               <>
                 <div style={{ display: 'flex', gap: 10, background: 'rgba(20,120,60,.07)', border: '1px solid rgba(20,120,60,.22)', borderRadius: 9, padding: '13px 15px', fontSize: 13.5, lineHeight: 1.6 }}>
                   <span style={{ color: '#14783C', fontWeight: 700 }}>✓</span>
-                  <span>Paid. Your first {weeks} practices are confirmed and your weekly slot is held three months out. We'll email you 7 days before the next cycle is due.</span>
+                  <span>Paid. Your first {weeks} practices are confirmed and your weekly slot is held {horizon} out. We'll email you 7 days before the next cycle is due.</span>
                 </div>
                 <DateList dates={dates} fmtDate={fmtDate} />
                 <button onClick={dismiss} style={primaryBtn}>Done</button>
@@ -162,7 +164,7 @@ export default function TeamPanel({ startsAt, ymd, hm, tz, settings, onClose, on
                 </div>
 
                 <div style={{ fontSize: 12.5, lineHeight: 1.6, color: 'rgba(0,0,0,.6)' }}>
-                  Your slot is held three months out. Each {weeks}-week cycle is billed {money(cycle(hours))}, with a reminder 7 days before it's due. A cycle unpaid more than {settings?.series_grace_days ?? 5} days past due releases the slot.
+                  Your slot is held {horizon} out. Each {weeks}-week cycle is billed {money(cycle(hours))}, with a reminder 7 days before it's due. A cycle unpaid more than {settings?.series_grace_days ?? 5} days past due releases the slot.
                 </div>
 
                 {err && <div style={{ fontSize: 12.5, color: '#BA0C2F', lineHeight: 1.6 }}>{err.charAt(0).toUpperCase() + err.slice(1)}</div>}

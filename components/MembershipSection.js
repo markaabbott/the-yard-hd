@@ -45,11 +45,12 @@ export default function MembershipSection({ userId, settings, tz, onChange }) {
 
   // The term starts when Stripe's webhook lands; poll briefly until it shows.
   async function paid() {
+    const before = Number(term?.hours_granted || 0);
     setClientSecret(null);
     setWaiting(true);
     for (let i = 0; i < 12; i++) {
       const t = await load();
-      if (t) break;
+      if (t && Number(t.hours_granted) > before) break;
       await new Promise((r) => setTimeout(r, 1500));
     }
     setWaiting(false);
@@ -74,13 +75,16 @@ export default function MembershipSection({ userId, settings, tz, onChange }) {
           </div>
           <div style={{ fontSize: 13.5, lineHeight: 1.6, color: 'rgba(0,0,0,.65)' }}>
             Book on the <strong>Drop-in</strong> tab. Your hours are used first; anything past them bills at your member rate.
-            Unused hours don't carry over, and a new term can be bought once this one ends.
+            Unused hours expire at the end of the term.
           </div>
         </div>
-      ) : (
+      ) : null}
+      {term !== undefined && (
         <>
           <div style={{ fontSize: 14, lineHeight: 1.6, color: 'rgba(0,0,0,.7)' }}>
-            Buy a block of cage hours for the next {days} days, then book any open cage on the Drop-in tab. Extra time is billed at your member rate.
+            {term
+              ? <><strong>Running low?</strong> Buy another plan any time. Its hours are added to what you have left, and your {days} days start over from today.</>
+              : <>Buy a block of cage hours for the next {days} days, then book any open cage on the Drop-in tab. Extra time is billed at your member rate.</>}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             {plans.map((p) => (
@@ -92,7 +96,7 @@ export default function MembershipSection({ userId, settings, tz, onChange }) {
                 </div>
                 <button disabled={working || !!clientSecret || waiting} onClick={() => buy(p)}
                   style={{ marginTop: 8, padding: '11px 14px', borderRadius: 7, border: 'none', background: RED, color: '#fff', fontFamily: 'Oswald, sans-serif', fontWeight: 500, fontSize: 14, letterSpacing: '.08em', textTransform: 'uppercase', cursor: 'pointer', opacity: working || clientSecret || waiting ? 0.6 : 1 }}>
-                  {working && buying?.id === p.id ? 'Starting…' : 'Buy plan'}
+                  {working && buying?.id === p.id ? 'Starting…' : term ? 'Add these hours' : 'Buy plan'}
                 </button>
               </div>
             ))}
@@ -101,7 +105,7 @@ export default function MembershipSection({ userId, settings, tz, onChange }) {
       )}
 
       {err && <div style={{ fontSize: 13, color: RED }}>{err.charAt(0).toUpperCase() + err.slice(1)}</div>}
-      {waiting && <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.6)' }}>Payment received. Starting your membership…</div>}
+      {waiting && <div style={{ fontSize: 13.5, color: 'rgba(0,0,0,.6)' }}>Payment received. {term ? 'Adding your hours…' : 'Starting your membership…'}</div>}
 
       {clientSecret && buying && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 20, background: 'rgba(0,0,0,.4)', overflowY: 'auto' }}>
