@@ -122,14 +122,19 @@ export default function BookingPanel({ kind = 'drop_in', cages, startsAt, settin
     setResult(r);
 
     if (r.due_now_cents > 0 && r.payment_id) {
-      const res = await fetch('/api/create-payment-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentId: r.payment_id })
-      });
-      const json = await res.json();
+      let json = {};
+      try {
+        const res = await fetch('/api/create-payment-intent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentId: r.payment_id })
+        });
+        json = await res.json().catch(() => ({ error: `The card form could not load (error ${res.status}). Please try again in a minute.` }));
+      } catch (e) {
+        json = { error: 'Could not reach the payment service. Check your connection and try again.' };
+      }
       setBooking(false);
-      if (json.error) { setErr(json.error); return; }
+      if (json.error || !json.clientSecret) { setErr(json.error || 'The card form could not load. Please try again.'); return; }
       setClientSecret(json.clientSecret);
     } else {
       setBooking(false);
