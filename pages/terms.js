@@ -29,8 +29,8 @@ export default function Terms() {
       <H>Cancellations and refunds</H>
       <P>
         Cancellations, refunds, no-shows, memberships, team practice cycles, and party deposits are governed by our Facility
-        Policies in effect when you book. In summary: cancellations are free until 48 hours before your start time; between 48
-        and 24 hours, half the amount paid is refunded; inside 24 hours and no-shows are non-refundable. Refunds for cancellations
+        Policies in effect when you book. In summary: cancellations are free until 72 hours before your start time; between 72
+        and 48 hours, half the amount paid is refunded; inside 48 hours and no-shows are non-refundable. Refunds for cancellations
         you request are returned less the card processing fee. If The Yard cancels, you receive a full refund, credit, or
         reschedule.
       </P>
