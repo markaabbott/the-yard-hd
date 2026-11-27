@@ -1,0 +1,13 @@
+{
+  "name": "the-yard-e2e",
+  "private": true,
+  "description": "Automated checks of the live booking app and website. No payments are made.",
+  "scripts": {
+    "test": "playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1",
+    "@supabase/supabase-js": "2.45.4"
+  }
+}
